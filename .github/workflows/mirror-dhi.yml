@@ -1,0 +1,53 @@
+name: mirror-dhi
+# Mirror durci des Docker Hardened Images (dhi.io) vers Harbor projet `base`.
+# Le tag `base/python:<ver>` est VOLONTAIREMENT mouvant : redigesté à chaque
+# rebuild DHI. Les consommateurs (apps) épinglent par digest via Renovate.
+#
+# ⚠️ Le trigger `schedule` est commenté tant que l'infra n'est pas prête :
+#    - runner ARC `onprem-dev-base-images` (Task 3 du plan) doit exister,
+#    - secrets HARBOR_USERNAME/HARBOR_PASSWORD (robot base-pusher) +
+#      DOCKERHUB_USERNAME/DOCKERHUB_PAT (pull dhi.io) doivent être posés.
+#    Décommenter le bloc `schedule` une fois ces deux prérequis en place.
+on:
+  # schedule:
+  #   - cron: "0 2 * * *"   # 02:00 UTC quotidien
+  workflow_dispatch: {}
+concurrency:
+  group: mirror-dhi
+  cancel-in-progress: false
+jobs:
+  mirror:
+    runs-on: onprem-dev-base-images
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - name: Install trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b /usr/local/bin
+      - name: Login dhi.io (pull DHI)
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_PAT: ${{ secrets.DOCKERHUB_PAT }}
+        run: echo "$DOCKERHUB_PAT" | docker login dhi.io -u "$DOCKERHUB_USERNAME" --password-stdin
+      - name: Login Harbor (push base)
+        env:
+          HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+          HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+        run: echo "$HARBOR_PASSWORD" | docker login registry-dev.soma-smart.cloud -u "$HARBOR_USERNAME" --password-stdin
+      - name: Pull DHI + retag
+        env:
+          DHI_REPO: dhi.io/python
+        run: |
+          set -eu
+          docker pull "${DHI_REPO}:${{ matrix.version }}"
+          docker tag  "${DHI_REPO}:${{ matrix.version }}" \
+            "registry-dev.soma-smart.cloud/base/python:${{ matrix.version }}"
+      - name: Trivy gate (CVE fixable Critical/High = échec)
+        run: |
+          trivy image --ignore-unfixed --severity CRITICAL,HIGH --exit-code 1 \
+            "registry-dev.soma-smart.cloud/base/python:${{ matrix.version }}"
+      - name: Push (idempotent — no-op si digest inchangé)
+        run: docker push "registry-dev.soma-smart.cloud/base/python:${{ matrix.version }}"
