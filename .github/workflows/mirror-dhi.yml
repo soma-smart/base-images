@@ -3,14 +3,11 @@ name: mirror-dhi
 # Le tag `base/python:<ver>` est VOLONTAIREMENT mouvant : redigesté à chaque
 # rebuild DHI. Les consommateurs (apps) épinglent par digest via Renovate.
 #
-# ⚠️ Le trigger `schedule` est commenté tant que l'infra n'est pas prête :
-#    - runner ARC `onprem-dev-base-images` (Task 3 du plan) doit exister,
-#    - secrets HARBOR_USERNAME/HARBOR_PASSWORD (robot base-pusher) +
-#      DOCKERHUB_USERNAME/DOCKERHUB_PAT (pull dhi.io) doivent être posés.
-#    Décommenter le bloc `schedule` une fois ces deux prérequis en place.
+# Infra prête (runner ARC onprem-dev-base-images + secrets HARBOR_*/DOCKERHUB_*) —
+# schedule nocturne actif depuis la validation du 2026-07-03 (run CI vert 4/4).
 on:
-  # schedule:
-  #   - cron: "0 2 * * *"   # 02:00 UTC quotidien
+  schedule:
+    - cron: "0 2 * * *"   # 02:00 UTC quotidien
   workflow_dispatch: {}
 concurrency:
   group: mirror-dhi
