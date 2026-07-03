@@ -24,9 +24,13 @@ jobs:
         version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - name: Install trivy
+        # Le runner ARC tourne en non-root → pas d'écriture dans /usr/local/bin.
+        # Installe dans un répertoire writable et l'ajoute au PATH des steps suivants.
         run: |
+          mkdir -p "$HOME/.local/bin"
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sh -s -- -b /usr/local/bin
+            | sh -s -- -b "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Login dhi.io (pull DHI)
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
