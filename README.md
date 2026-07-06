@@ -34,6 +34,89 @@ dhi.io/python:<ver>  ──(mirror nocturne)──▶  registry-dev.soma-smart.c
 
 Une fois les deux prérequis en place, **décommenter le bloc `schedule`** dans le workflow.
 
+---
+
+## Boucle de remédiation automatique (Renovate self-hosted)
+
+Le mirror publie une base **redigestée**, mais ça ne remédie rien tant que les apps épinglent l'**ancien** digest. La **propagation** du nouveau digest vers les apps est assurée par un **Renovate self-hosted** hébergé dans ce repo — c'est ce qui ferme la boucle et rend la remédiation *automatique*.
+
+> **Pourquoi self-hosted (et pas Mend SaaS / Dependabot / argocd-image-updater ?)**
+> - **Mend SaaS / Dependabot** : hébergés chez GitHub → n'atteignent pas le Harbor **interne** `registry-dev.soma-smart.cloud` → ne peuvent pas résoudre le digest des golden bases. (Mend marche sur Outline seulement parce que le `FROM` y pointe vers un registre *public*.)
+> - **argocd-image-updater / Flux** : swappent l'image *déployée*, ne **rebuildent** pas une app depuis une base fraîche. Or base→rebuild passe forcément par un bump du `FROM` + CI.
+> - **Renovate self-hosted** tourne sur le runner interne (atteint Harbor), résout le digest privé via `hostRules`, ouvre une PR et l'automerge. C'est l'outil unique de gestion des deps sur toutes les apps (base DHI **+** pip **+** github-actions).
+
+### Composants
+
+| Élément | Rôle |
+|---|---|
+| `.github/workflows/renovate.yml` | Lance Renovate self-hosted (cron 3×/jour + `workflow_dispatch`) sur le runner `onprem-dev-base-images`. Génère un token d'installation de la GitHub App puis exécute `renovatebot/github-action`. |
+| `renovate-config.js` | **Config globale unique** (`requireConfig: "ignored"` → les `renovate.json` de repo sont ignorés). `autodiscover` + `hostRules` Harbor + `packageRules` (voir plus bas). |
+| GitHub App **`soma-base-bumper`** | Auth de Renovate. `autodiscover` ⇒ **son installation = la liste des repos consommateurs**. Perms : `contents:write` + `pull-requests:write` + `checks:read` + `statuses:read`. Secrets repo : `BASE_BUMPER_APP_ID`, `BASE_BUMPER_PRIVATE_KEY`. |
+| `ci-docker-build.yml` (dans **chaque app**) | Gate : `docker build` sur PR. C'est le check qui doit passer au vert avant que Renovate automerge un bump de digest. |
+
+### Le flux
+
+```
+mirror-dhi (02:00)  ──▶  base/python:<ver> redigesté (Harbor privé)
+                                   │  nouveau digest
+renovate.yml (cron/dispatch)       ▼
+  autodiscover (App soma-base-bumper) → hostRules résout le digest sur Harbor
+  ouvre une PR "Update …/base/python:<ver> digest to <court>"  sur l'app
+        │
+  ci-docker-build (PR) builde l'app sur la base candidate  ──▶  vert
+        │
+  Renovate automerge (org Free : merge côté Renovate quand les checks sont verts)
+        │  merge sur main de l'app
+  CD continu de l'app (push main) rebuild → bump image.tag dans infra-datacenter-docs → ArgoCD
+```
+
+### `packageRules` (résumé)
+
+| Famille | Comportement |
+|---|---|
+| `…/base/python` (digest interne) | **automerge** digest/pin (gate = `ci-docker-build`). ⚠️ La règle `pinDigests` est **séparée** de la règle `automerge` : `pinDigests` derrière un `matchUpdateTypes` **ne génère pas** le pin (piège Renovate). |
+| `python` (builder slim public) | `enabled: false` — stage jeté, CVE non shippées, volontairement non suivi. |
+| `github-actions` | automerge minor/patch/digest (SHA-pinnées) ; **majors** → Dependency Dashboard. |
+| `pip` / `pep621` | **PR, revue humaine** (pas d'automerge). |
+
+`prHourlyLimit: 0` : le bump de digest de base n'est jamais rate-limité.
+
+### Ajouter une app à la boucle
+
+1. Installer la GitHub App **`soma-base-bumper`** sur le repo de l'app (action org-admin).
+2. Rebaser son `Dockerfile` sur `registry-dev.soma-smart.cloud/base/python:<ver>@sha256:<digest>` (runtime **digest-pinné littéral**).
+3. Ajouter `.github/workflows/ci-docker-build.yml` (gate build sur PR, runner interne).
+4. C'est tout — pas de `renovate.json` par repo (la config globale gère). Renovate découvrira l'app au run suivant.
+
+### Exemple concret — E2E validé le 2026-07-06 (agent-infogerance)
+
+Déroulé réel, de bout en bout, **sans aucune action manuelle** entre l'étape 2 et 6 :
+
+1. **État initial** — `agent-infogerance/Dockerfile` runtime pinné :
+   `FROM registry-dev.soma-smart.cloud/base/python:3.14@sha256:691eb62d…`
+2. **Simulation d'un mouvement de base** — on retire le digest (`FROM …/base/python:3.14`) et on pousse sur `main`.
+3. **Renovate détecte** — le run `renovate.yml` résout le digest courant sur le Harbor privé et ouvre **PR #35** : *« chore(deps): pin registry-dev.soma-smart.cloud/base/python docker tag to 691eb62 »*
+   ```diff
+   -FROM registry-dev.soma-smart.cloud/base/python:3.14
+   +FROM registry-dev.soma-smart.cloud/base/python:3.14@sha256:691eb62d78825b1eb…
+   ```
+4. **Gate** — `ci-docker-build` builde l'app sur la base pinnée → **vert** (+ `quality`, `secrets` verts).
+5. **Automerge** — au run Renovate suivant, checks verts constatés → **Renovate merge #35 lui-même** (org Free, `platformAutomerge: false`).
+6. **Rebuild + deploy** — le merge sur `main` déclenche le CD continu → build `20260706-094934-23ae92f` → PR de bump `image.tag` (#531) auto-mergée dans `infra-datacenter-docs` → **ArgoCD** déploie → pod `agent-infogerance-5fcbcb849b-wlbkj` **Running**.
+
+En production, l'étape 2 n'est pas simulée : c'est le `mirror-dhi` nocturne qui redigeste la base ; le reste est identique.
+
+### Pièges opérationnels
+
+- **`pinDigests` doit être dans sa propre règle** (sans `matchUpdateTypes`) — sinon une base non-pinnée n'est jamais pinnée.
+- **Auth Harbor silencieuse** : si `HARBOR_USERNAME`/`HARBOR_PASSWORD` sont faux/expirés, la résolution du digest échoue **en warning** (job vert, aucune PR). Le **Dependency Dashboard** (`dependencyDashboard: true`) surface ces « Dependency Lookup Warnings » — les surveiller.
+- **Org GitHub Free** : pas de branch protection → `platformAutomerge: false` (Renovate merge lui-même après avoir constaté les checks verts). Le gate `ci-docker-build` de l'app est donc le **seul** vrai filet ⇒ chaque app dans la boucle **doit** l'avoir.
+- **Un check rouge sans rapport bloque l'automerge** : Renovate attend **tous** les checks verts. Ex. constaté sur som-portal (check `pip-audit` rouge à cause de CVE applicatives) → l'automerge d'un bump de digest ne part pas tant que ces CVE ne sont pas corrigées (ce que Renovate propose par ailleurs via ses PR pip).
+
 ## Contexte
 
-Spec & plan : `soma-smart/infra-datacenter-docs` → `docs/superpowers/{specs,plans}/2026-07-03-industrialisation-cve-harbor*`. Ticket : [OpenProject #3793](https://projet.soma-smart.cloud/work_packages/3793).
+Spec & plan : `soma-smart/infra-datacenter-docs` → `docs/superpowers/{specs,plans}/` :
+- `2026-07-03-industrialisation-cve-harbor*` — le socle (mirror DHI + projet Harbor `base`).
+- `2026-07-06-boucle-remediation-cve-renovate-design.md` — la boucle Renovate self-hosted (cette section).
+
+Ticket : [OpenProject #3793](https://projet.soma-smart.cloud/work_packages/3793).
