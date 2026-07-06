@@ -9,7 +9,7 @@
 // installée (= les consommateurs). Trois familles de mises à jour, uniformes partout :
 //   1. digest de la base DHI interne  -> automerge (gate = ci-docker-build sur PR)
 //   2. github-actions (SHA-pinnées)   -> automerge minor/patch/digest, majors en dashboard
-//   3. deps applicatives (pip/pep621) -> PR, revue humaine
+//   3. deps applicatives (pip/pep621) -> mineur/patch automerge (matures 3j), majeur en PR
 module.exports = {
   platform: "github",
   autodiscover: true,
@@ -79,8 +79,23 @@ module.exports = {
       dependencyDashboardApproval: true,
     },
     {
-      description: "Deps applicatives (pip/pep621) : PR, revue humaine (pas d'automerge)",
+      // Corrections mineures/patch : automerge (gate = CI de l'app + docker build de
+      // la PR, qui rebuild avec les nouvelles deps). minimumReleaseAge = maturation :
+      // on n'automerge pas une version publiee il y a moins de 3 jours (protection
+      // supply-chain contre un paquet compromis/yanked juste apres publication).
+      description: "Deps applicatives pip/pep621 — mineur/patch : automerge (matures 3j)",
       matchManagers: ["pip_requirements", "pep621"],
+      matchUpdateTypes: ["minor", "patch", "digest"],
+      automerge: true,
+      automergeType: "pr",
+      platformAutomerge: false,
+      minimumReleaseAge: "3 days",
+      internalChecksFilter: "strict",
+    },
+    {
+      description: "Deps applicatives pip/pep621 — majeur : PR, revue humaine",
+      matchManagers: ["pip_requirements", "pep621"],
+      matchUpdateTypes: ["major"],
       automerge: false,
     },
   ],
