@@ -1,0 +1,40 @@
+name: renovate
+# Boucle de remediation CVE — outil UNIQUE et homogene sur tous les repos d'apps.
+# Renovate self-hosted sur le runner interne (atteint le Harbor prive via hostRules).
+# Config globale unique = renovate-config.js (requireConfig: ignored). autodiscover =>
+# l'installation de l'App soma-base-bumper definit les repos consommateurs.
+# Cf. spec 2026-07-06.
+on:
+  schedule:
+    - cron: "0 6,12,18 * * *"   # 3x/jour UTC (apres le mirror-dhi de 02:00)
+  workflow_dispatch:
+    inputs:
+      logLevel:
+        description: "Renovate LOG_LEVEL"
+        default: "info"
+concurrency:
+  group: renovate
+  cancel-in-progress: false
+jobs:
+  renovate:
+    runs-on: onprem-dev-base-images
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.BASE_BUMPER_APP_ID }}
+          private-key: ${{ secrets.BASE_BUMPER_PRIVATE_KEY }}
+          owner: soma-smart
+          # pas de 'repositories' => token sur TOUTES les installations de l'App = les consommateurs
+      - name: Checkout (config global renovate-config.js)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Self-hosted Renovate
+        uses: renovatebot/github-action@b50d2ba2bd928235abdcc14d06dfafc217f1c565 # v46.1.18
+        with:
+          configurationFile: renovate-config.js
+          token: ${{ steps.app-token.outputs.token }}
+        env:
+          HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+          HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+          LOG_LEVEL: ${{ inputs.logLevel || 'info' }}
