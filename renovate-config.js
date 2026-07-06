@@ -21,6 +21,9 @@ module.exports = {
   // Dashboard actif : surface les "Dependency Lookup Warnings" (ex. échec d'auth
   // Harbor sur hostRules) qui, sinon, rendent la boucle muette sans erreur de job.
   dependencyDashboard: true,
+  // Le bump de digest de base ne doit jamais etre rate-limite (sinon un rebuild DHI
+  // peut attendre des heures derriere d'autres PR). 0 = illimite.
+  prHourlyLimit: 0,
   enabledManagers: ["dockerfile", "pip_requirements", "pep621", "github-actions"],
   // Creds Harbor privé pour résoudre le digest du tag mouvant base/python.
   hostRules: [
@@ -33,15 +36,24 @@ module.exports = {
   ],
   packageRules: [
     {
-      description:
-        "Base DHI interne : automerge digest-only (gate = docker build sur PR ; org Free => merge cote Renovate)",
+      // Active le digest-pinning de la base. NE PAS gater par matchUpdateTypes :
+      // la decision de pinner precede la connaissance de l'updateType, donc un
+      // pinDigests derriere matchUpdateTypes ne genere jamais le pin (piege Renovate,
+      // constate a l'E2E : une base non-pinnee restait non-pinnee).
+      description: "Base DHI interne : activer le digest-pinning",
       matchManagers: ["dockerfile"],
       matchPackageNames: ["registry-dev.soma-smart.cloud/base/python"],
       pinDigests: true,
+    },
+    {
+      description:
+        "Base DHI interne : automerge digest/pin (gate = docker build sur PR ; org Free => merge cote Renovate)",
+      matchManagers: ["dockerfile"],
+      matchPackageNames: ["registry-dev.soma-smart.cloud/base/python"],
+      matchUpdateTypes: ["digest", "pinDigest"],
       automerge: true,
       automergeType: "pr",
       platformAutomerge: false,
-      matchUpdateTypes: ["digest", "pinDigest"],
     },
     {
       description:
