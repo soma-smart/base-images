@@ -1,21 +1,27 @@
-// Config GLOBAL du Renovate self-hosted (boucle de remédiation CVE).
+// Config GLOBAL et UNIQUE du Renovate self-hosted (boucle de remédiation CVE).
 //
-// Ce Renovate ne gère QU'UNE chose : le digest de la base DHI interne
-// (registry-dev.soma-smart.cloud/base/python) dans le FROM runtime des apps.
-// Dependabot / Mend SaaS restent maîtres du reste (pip, github-actions, builder
-// slim public) — eux ne peuvent pas atteindre le Harbor interne, d'où ce Renovate.
+// Modèle homogène (2026-07-06) : UN SEUL outil de gestion des dépendances sur tous
+// les repos d'apps — Renovate self-hosted. Plus de Dependabot, plus de renovate.json
+// par repo. Ce fichier est la seule source de vérité (requireConfig: "ignored" =>
+// les éventuels renovate.json résiduels des repos sont ignorés).
 //
 // Portée : autodiscover sur les repos où la GitHub App `soma-base-bumper` est
-// installée (= som-portal, agent-infogerance). enabledManagers dockerfile + match
-// de la seule base => aucun recouvrement avec Dependabot/Mend, aucun renovate.json
-// par repo requis (rien n'est écrasé).
+// installée (= les consommateurs). Trois familles de mises à jour, uniformes partout :
+//   1. digest de la base DHI interne  -> automerge (gate = ci-docker-build sur PR)
+//   2. github-actions (SHA-pinnées)   -> automerge minor/patch/digest, majors en dashboard
+//   3. deps applicatives (pip/pep621) -> PR, revue humaine
 module.exports = {
   platform: "github",
   autodiscover: true,
   onboarding: false,
-  requireConfig: "optional",
-  dependencyDashboard: false,
-  enabledManagers: ["dockerfile"],
+  // Ce fichier global est la SEULE config : on ignore tout renovate.json de repo
+  // (sinon il serait mergé avec la précédence la plus haute et pourrait désactiver
+  //  silencieusement la boucle — cf. review PR #1).
+  requireConfig: "ignored",
+  // Dashboard actif : surface les "Dependency Lookup Warnings" (ex. échec d'auth
+  // Harbor sur hostRules) qui, sinon, rendent la boucle muette sans erreur de job.
+  dependencyDashboard: true,
+  enabledManagers: ["dockerfile", "pip_requirements", "pep621", "github-actions"],
   // Creds Harbor privé pour résoudre le digest du tag mouvant base/python.
   hostRules: [
     {
@@ -39,10 +45,31 @@ module.exports = {
     },
     {
       description:
-        "Builder slim public : geré par Dependabot, ce Renovate ne le touche pas",
+        "Builder slim public : stage jete (CVE non shippees), volontairement non suivi",
       matchManagers: ["dockerfile"],
       matchPackageNames: ["python"],
       enabled: false,
+    },
+    {
+      description:
+        "github-actions (SHA-pinnees) : automerge minor/patch/digest, gate = CI du repo",
+      matchManagers: ["github-actions"],
+      matchUpdateTypes: ["minor", "patch", "digest", "pinDigest"],
+      pinDigests: true,
+      automerge: true,
+      automergeType: "pr",
+      platformAutomerge: false,
+    },
+    {
+      description: "github-actions majors : revue via Dependency Dashboard",
+      matchManagers: ["github-actions"],
+      matchUpdateTypes: ["major"],
+      dependencyDashboardApproval: true,
+    },
+    {
+      description: "Deps applicatives (pip/pep621) : PR, revue humaine (pas d'automerge)",
+      matchManagers: ["pip_requirements", "pep621"],
+      automerge: false,
     },
   ],
 };
