@@ -40,16 +40,22 @@ module.exports = {
       // la decision de pinner precede la connaissance de l'updateType, donc un
       // pinDigests derriere matchUpdateTypes ne genere jamais le pin (piege Renovate,
       // constate a l'E2E : une base non-pinnee restait non-pinnee).
-      description: "Base DHI interne : activer le digest-pinning",
+      description: "Bases internes (DHI distroless + slim durci) : activer le digest-pinning",
       matchManagers: ["dockerfile"],
-      matchPackageNames: ["registry-dev.soma-smart.cloud/base/python"],
+      matchPackageNames: [
+        "registry-dev.soma-smart.cloud/base/python",
+        "registry-dev.soma-smart.cloud/base/python-slim",
+      ],
       pinDigests: true,
     },
     {
       description:
-        "Base DHI interne : automerge digest/pin (gate = docker build sur PR ; org Free => merge cote Renovate)",
+        "Bases internes (DHI + slim) : automerge digest/pin (gate = docker build sur PR ; org Free => merge cote Renovate)",
       matchManagers: ["dockerfile"],
-      matchPackageNames: ["registry-dev.soma-smart.cloud/base/python"],
+      matchPackageNames: [
+        "registry-dev.soma-smart.cloud/base/python",
+        "registry-dev.soma-smart.cloud/base/python-slim",
+      ],
       matchUpdateTypes: ["digest", "pinDigest"],
       automerge: true,
       automergeType: "pr",
