@@ -17,6 +17,21 @@ dhi.io/python:<ver>  ──(mirror nocturne)──▶  registry-dev.soma-smart.c
 - **Gate Trivy** : avant push, `trivy image --ignore-unfixed --severity CRITICAL,HIGH --exit-code 1` échoue si une CVE fixable Critical/High subsiste → on ne propage jamais une base régressée.
 - **Versions maintenues** : `3.11`, `3.12`, `3.13`, `3.14` (union des versions utilisées par les apps).
 
+## `base/python-slim` — base scientifique (non-distroless)
+
+Certaines apps (finops : pandas/scipy/scikit-learn) ont besoin d'un **runtime glibc complet** (libstdc++, libgomp) que le socle DHI **distroless** n'offre pas. Pour elles, une base SLIM durcie **construite** (pas mirrorée) :
+
+```
+python:<ver>-slim  ──(build nocturne + libgomp1 + non-root 65532)──▶  base/python-slim:<ver>
+                                                        │
+                        apps sci: FROM …/base/python-slim:<ver>@sha256:<digest>  (digest-pin Renovate)
+```
+
+- `.github/workflows/build-python-slim.yml` — `docker build python-slim/Dockerfile` (`FROM python:<ver>-slim` **non pinné** + `--pull` → derniers patchs Debian) → gate Trivy → push. Même robot `base-pusher`, même runner, même tag mouvant + digest-pin consommateur que `base/python`.
+- Durcissement : **non-root uid 65532** (aligné DHI), `libgomp1` (OpenMP scipy/sklearn), UTF-8 forcé, pas de cache apt. Distroless-like côté sécurité mais garde un shell + glibc pour les wheels natives.
+- **Versions** : `3.14` (finops). Étendre la matrice quand une autre app scientifique arrive.
+- **Choisir la base** : app standard → `base/python` (distroless, le plus dur) ; app scientifique (scipy/sklearn/pandas lourd, ou qui invoque un binaire système) → `base/python-slim`.
+
 ## Workflow
 
 `.github/workflows/mirror-dhi.yml` — matrix par version : pull DHI → retag → gate Trivy → push Harbor. Idempotent (un digest inchangé = no-op).

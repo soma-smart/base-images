@@ -1,0 +1,57 @@
+name: build-python-slim
+# Base SLIM durcie (non-distroless) pour les apps scientifiques (scipy/scikit-learn)
+# que le distroless DHI ne couvre pas. Construite depuis python:<ver>-slim + libgomp1
+# + non-root uid 65532, Trivy-gatée, poussée en tag mouvant base/python-slim:<ver>
+# (rebuild nocturne pour les patchs slim ; consommateurs épinglent par digest via Renovate).
+on:
+  schedule:
+    - cron: "0 3 * * *"   # 03:00 UTC (après le mirror DHI de 02:00)
+  workflow_dispatch: {}
+concurrency:
+  group: build-python-slim
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: onprem-dev-base-images
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["3.14"]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Install trivy
+        # Runner ARC non-root → installe dans un répertoire writable + PATH.
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Login Docker Hub (pull python:<ver>-slim — évite le rate-limit anonyme)
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_PAT: ${{ secrets.DOCKERHUB_PAT }}
+        run: echo "$DOCKERHUB_PAT" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+      - name: Login Harbor (push base)
+        env:
+          HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
+          HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
+        run: echo "$HARBOR_PASSWORD" | docker login registry-dev.soma-smart.cloud -u "$HARBOR_USERNAME" --password-stdin
+      - name: Build (--pull → dernier python:<ver>-slim pour les patchs)
+        env:
+          VERSION: ${{ matrix.version }}
+        run: |
+          set -eu
+          docker build --pull \
+            --build-arg PY_VERSION="$VERSION" \
+            -t "registry-dev.soma-smart.cloud/base/python-slim:${VERSION}" \
+            -f python-slim/Dockerfile python-slim
+      - name: Trivy gate (CVE fixable Critical/High = échec)
+        env:
+          VERSION: ${{ matrix.version }}
+        run: |
+          trivy image --ignore-unfixed --severity CRITICAL,HIGH --exit-code 1 \
+            "registry-dev.soma-smart.cloud/base/python-slim:${VERSION}"
+      - name: Push (idempotent — no-op si digest inchangé)
+        env:
+          VERSION: ${{ matrix.version }}
+        run: docker push "registry-dev.soma-smart.cloud/base/python-slim:${VERSION}"
