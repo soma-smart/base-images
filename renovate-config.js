@@ -24,6 +24,21 @@ module.exports = {
   // Le bump de digest de base ne doit jamais etre rate-limite (sinon un rebuild DHI
   // peut attendre des heures derriere d'autres PR). 0 = illimite.
   prHourlyLimit: 0,
+  // Remediation CVE PROACTIVE : Renovate interroge osv.dev pour les deps figees de
+  // chaque app et ouvre une PR de fix DES qu'une CVE est publiee contre une version
+  // epinglee (CVE-triggered, pas seulement "rester courant"). Comble le trou du scan
+  // reactif (pip-audit ne tournait qu'a la PR). Self-hosted -> OSV direct, pas besoin
+  // de Dependabot (org Free / repos prives). Le fix repasse par les gates ci-python +
+  // ci-docker-build de l'app. Complementaire du scan Trivy planifie de Harbor (images).
+  osvVulnerabilityAlerts: true,
+  vulnerabilityAlerts: {
+    enabled: true,
+    labels: ["security", "vulnerability"],
+    // Un fix de CVE ne doit PAS attendre la maturation 3j des bumps normaux ni le
+    // quota horaire -> traitement prompt. L'automerge suit la politique existante
+    // (mineur/patch automerge ; majeur = revue humaine, cf. packageRules).
+    minimumReleaseAge: null,
+  },
   enabledManagers: ["dockerfile", "pip_requirements", "pep621", "github-actions"],
   // Creds Harbor privé pour résoudre le digest du tag mouvant base/python.
   hostRules: [
