@@ -1,0 +1,79 @@
+name: validate-renovate-config
+# Valide `renovate-config.js` — le fichier qui pilote la boucle sur TOUS les dépôts
+# consommateurs.
+#
+# ⚠️ POURQUOI CE GATE EXISTE. Une config Renovate invalide ne casse pas : elle se
+# TAIT. Le job reste vert, aucune PR n'est ouverte, et rien ne distingue « manager
+# rejeté » de « rien à mettre à jour ». Comme ce fichier est la SEULE config
+# (`requireConfig: "ignored"`), une erreur ici rend muette la boucle entière, sur
+# tous les dépôts à la fois.
+#
+# ⚠️ ET LA VERSION DU VALIDATEUR EST LE PIÈGE, PAS UN DÉTAIL. Valider contre une
+# version différente de celle qui tourne est exactement ce qui a produit l'incident
+# du 2026-08-11 : `multica-runtime` validait sa config contre Renovate 37.440.7
+# alors que la boucle tourne en 43 — le gate rendait vert sur un schéma que
+# l'instance n'utilise plus, et inversement rouge sur celui qu'elle attend.
+# D'où le couplage ci-dessous : `RENOVATE_MAJOR` DOIT rester égal à la version
+# utilisée par `renovate.yml`. Elle y est implicite (défaut `renovate-version` de
+# `renovatebot/github-action`) — si ce défaut change au bump de l'action, mettre
+# cette valeur à jour DANS LE MÊME COMMIT.
+on:
+  pull_request:
+    paths:
+      - "renovate-config.js"
+      - ".github/workflows/renovate.yml"
+      - ".github/workflows/validate-renovate-config.yml"
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: validate-renovate-config-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  validate:
+    runs-on: onprem-dev-base-images
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Valider renovate-config.js
+        env:
+          # Doit suivre le `renovate-version` effectif de renovate.yml (cf. en-tête).
+          RENOVATE_MAJOR: "43"
+          # ⚠️ La config lit `process.env.HARBOR_*` pour ses `hostRules`. Sans ces
+          # variables, elles vaudraient `undefined` et la validation échouerait sur
+          # un faux motif — la config serait pourtant correcte en production, où le
+          # workflow les fournit. Valeurs factices : on valide la FORME, pas l'accès.
+          HARBOR_USERNAME: validation-placeholder
+          HARBOR_PASSWORD: validation-placeholder
+        # ⚠️ Par STDIN, pas par bind-mount : la résolution d'un montage de l'espace
+        # de travail depuis le démon dind n'est pas garantie (leçon du gate jumeau de
+        # `multica-runtime`). L'extension `.js` est OBLIGATOIRE — le validateur
+        # `require()` le fichier, un `/tmp/r` sans extension ne serait pas chargé.
+        run: |
+          docker run --rm -i \
+            -e HARBOR_USERNAME -e HARBOR_PASSWORD \
+            "registry-dev.soma-smart.cloud/dockerhub-proxy/renovate/renovate:${RENOVATE_MAJOR}" \
+            sh -c 'cat > /tmp/renovate-config.js && renovate-config-validator /tmp/renovate-config.js' \
+            < renovate-config.js
+
+      - name: Rappel — un manager activé sans motif est inerte
+        # Contrôle bon marché, mais il ferme la moitié du piège que ce dépôt vient
+        # de payer : `custom.regex` dans `enabledManagers` et le bloc
+        # `customManagers` doivent aller ENSEMBLE. L'un sans l'autre ne produit
+        # aucune erreur — seulement du silence.
+        # ⚠️ Pas de backtick dans ces chaînes : dans un `run:`, elles sont
+        # interprétées par bash comme une substitution de commande. On écrit donc
+        # custom.regex sans accent grave, à dessein.
+        run: |
+          active=$(grep -c '"custom\.regex"' renovate-config.js || true)
+          motifs=$(grep -c 'customType: "regex"' renovate-config.js || true)
+          if [ "$active" -gt 0 ] && [ "$motifs" -eq 0 ]; then
+            echo '::error::custom.regex est active mais AUCUN customManager n est declare - inerte.' >&2
+            exit 1
+          fi
+          if [ "$active" -eq 0 ] && [ "$motifs" -gt 0 ]; then
+            echo "::error::$motifs customManager(s) declare(s) mais custom.regex absent d enabledManagers - inerte." >&2
+            exit 1
+          fi
+          echo "OK - $motifs motif(s) regex, manager active=$active."
