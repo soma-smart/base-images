@@ -34,6 +34,16 @@ jobs:
         with:
           configurationFile: renovate-config.js
           token: ${{ steps.app-token.outputs.token }}
+          # ⚠️ EXPLICITE, ET PAS LE DÉFAUT DE L'ACTION — sinon la version de Renovate
+          # bouge TOUTE SEULE et sans revue. Le défaut de `renovate-version` est une
+          # valeur interne à l'action : il valait '43' en v46.1.18 et '44' dès
+          # v46.2.0. Or les bumps mineurs de `github-actions` sont AUTOMERGÉS ici
+          # (cf. renovate-config.js) → l'outil qui garde tout le parc contre la
+          # dérive dériverait lui-même, en silence, sur un bump d'action anodin.
+          # ⚠️ Doit rester égale à `VERSION_RENOVATE` de validate-renovate-config.yml :
+          # valider contre une version différente de celle qui tourne est exactement
+          # ce qui a produit l'incident du 2026-08-11. Les deux se bumpent ENSEMBLE.
+          renovate-version: "43"
         env:
           HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
           HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
