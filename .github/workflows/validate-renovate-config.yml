@@ -13,10 +13,20 @@ name: validate-renovate-config
 # du 2026-08-11 : `multica-runtime` validait sa config contre Renovate 37.440.7
 # alors que la boucle tourne en 43 — le gate rendait vert sur un schéma que
 # l'instance n'utilise plus, et inversement rouge sur celui qu'elle attend.
-# D'où le couplage ci-dessous : `RENOVATE_MAJOR` DOIT rester égal à la version
-# utilisée par `renovate.yml`. Elle y est implicite (défaut `renovate-version` de
-# `renovatebot/github-action`) — si ce défaut change au bump de l'action, mettre
-# cette valeur à jour DANS LE MÊME COMMIT.
+# D'où le couplage ci-dessous : `VERSION_RENOVATE` DOIT rester égal au
+# `renovate-version` DÉCLARÉ dans `renovate.yml`. Les deux se bumpent ENSEMBLE.
+#
+# ⚠️ Ce couplage n'a de sens que parce que `renovate.yml` déclare cette version
+# EXPLICITEMENT. Tant qu'elle reposait sur le défaut de l'action, elle était
+# invisible ET mobile : ce défaut valait '43' en v46.1.18 et '44' dès v46.2.0, et
+# les bumps mineurs de `github-actions` sont automergés ici — la version aurait
+# donc changé sans revue, ce gate restant vert en validant contre l'ancienne.
+# Ne pas revenir au défaut implicite.
+#
+# ⚠️ Le nom n'est pas `RENOVATE_MAJOR` : tout `RENOVATE_*` est interprété par
+# Renovate comme une option de config (`RENOVATE_MAJOR` → l'objet `major`).
+# Inoffensif tant que la variable n'est pas passée au conteneur, mais c'est un
+# piège armé pour le jour où quelqu'un l'ajoute au `-e`.
 on:
   pull_request:
     paths:
@@ -38,8 +48,8 @@ jobs:
 
       - name: Valider renovate-config.js
         env:
-          # Doit suivre le `renovate-version` effectif de renovate.yml (cf. en-tête).
-          RENOVATE_MAJOR: "43"
+          # Doit rester égale au `renovate-version` déclaré dans renovate.yml (cf. en-tête).
+          VERSION_RENOVATE: "43"
           # ⚠️ La config lit `process.env.HARBOR_*` pour ses `hostRules`. Sans ces
           # variables, elles vaudraient `undefined` et la validation échouerait sur
           # un faux motif — la config serait pourtant correcte en production, où le
@@ -53,27 +63,40 @@ jobs:
         run: |
           docker run --rm -i \
             -e HARBOR_USERNAME -e HARBOR_PASSWORD \
-            "registry-dev.soma-smart.cloud/dockerhub-proxy/renovate/renovate:${RENOVATE_MAJOR}" \
+            "registry-dev.soma-smart.cloud/dockerhub-proxy/renovate/renovate:${VERSION_RENOVATE}" \
             sh -c 'cat > /tmp/renovate-config.js && renovate-config-validator /tmp/renovate-config.js' \
             < renovate-config.js
 
-      - name: Rappel — un manager activé sans motif est inerte
-        # Contrôle bon marché, mais il ferme la moitié du piège que ce dépôt vient
-        # de payer : `custom.regex` dans `enabledManagers` et le bloc
-        # `customManagers` doivent aller ENSEMBLE. L'un sans l'autre ne produit
-        # aucune erreur — seulement du silence.
-        # ⚠️ Pas de backtick dans ces chaînes : dans un `run:`, elles sont
-        # interprétées par bash comme une substitution de commande. On écrit donc
-        # custom.regex sans accent grave, à dessein.
+      - name: Manager et motifs doivent rester appariés
+        # Ce que le validateur NE dit PAS : `custom.regex` activé sans
+        # `customManagers`, ou l'inverse, est parfaitement VALIDE et totalement
+        # inerte. C'est le piège exact qui a coûté six versions de multica.
+        #
+        # ⚠️ Contrôle sur l'OBJET CHARGÉ, pas sur le texte du fichier. Un grep
+        # serait trompé par la modification la plus probable — commenter la ligne
+        # `// "custom.regex",` pour déboguer : le motif resterait « trouvé », le
+        # gate vert, et les trois managers muets. On charge donc le module et on
+        # interroge la structure, ce qui résiste aussi au reformatage.
+        env:
+          VERSION_RENOVATE: "43"
+          HARBOR_USERNAME: validation-placeholder
+          HARBOR_PASSWORD: validation-placeholder
         run: |
-          active=$(grep -c '"custom\.regex"' renovate-config.js || true)
-          motifs=$(grep -c 'customType: "regex"' renovate-config.js || true)
-          if [ "$active" -gt 0 ] && [ "$motifs" -eq 0 ]; then
-            echo '::error::custom.regex est active mais AUCUN customManager n est declare - inerte.' >&2
-            exit 1
-          fi
-          if [ "$active" -eq 0 ] && [ "$motifs" -gt 0 ]; then
-            echo "::error::$motifs customManager(s) declare(s) mais custom.regex absent d enabledManagers - inerte." >&2
-            exit 1
-          fi
-          echo "OK - $motifs motif(s) regex, manager active=$active."
+          docker run --rm -i \
+            -e HARBOR_USERNAME -e HARBOR_PASSWORD \
+            "registry-dev.soma-smart.cloud/dockerhub-proxy/renovate/renovate:${VERSION_RENOVATE}" \
+            sh -c 'cat > /tmp/renovate-config.js && node -e "
+              const c = require(\"/tmp/renovate-config.js\");
+              const actif = (c.enabledManagers || []).includes(\"custom.regex\");
+              const n = (c.customManagers || []).length;
+              if (actif && n === 0) {
+                console.error(\"::error::custom.regex est active mais aucun customManager declare - inerte.\");
+                process.exit(1);
+              }
+              if (!actif && n > 0) {
+                console.error(\`::error::\${n} customManager(s) declare(s) mais custom.regex absent d enabledManagers - inerte.\`);
+                process.exit(1);
+              }
+              console.log(\`OK - \${n} motif(s), custom.regex actif=\${actif}\`);
+            "' \
+            < renovate-config.js

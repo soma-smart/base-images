@@ -6,10 +6,17 @@
 // les éventuels renovate.json résiduels des repos sont ignorés).
 //
 // Portée : autodiscover sur les repos où la GitHub App `soma-base-bumper` est
-// installée (= les consommateurs). Trois familles de mises à jour, uniformes partout :
+// installée (= les consommateurs). Quatre familles de mises à jour, uniformes partout :
 //   1. digest de la base DHI interne  -> automerge (gate = ci-docker-build sur PR)
 //   2. github-actions (SHA-pinnées)   -> automerge minor/patch/digest, majors en dashboard
 //   3. deps applicatives (pip/pep621) -> mineur/patch automerge (matures 3j), majeur en PR
+//   4. épingles regex (custom.regex)  -> JAMAIS d'automerge, majeurs en dashboard
+//
+// ⚠️ La famille 4 ne partage AUCUNE `packageRule` avec les trois autres : elles
+// gatent toutes sur `matchManagers`, et un dep extrait par un manager regex se
+// déclare `custom.regex`. Sans sa propre règle, elle n'hériterait donc de rien —
+// ni maturation supply-chain, ni revue des majeurs — ce qui serait l'inverse de la
+// politique de toutes les autres. Sa règle est écrite explicitement plus bas.
 module.exports = {
   platform: "github",
   autodiscover: true,
@@ -68,7 +75,17 @@ module.exports = {
   // sans effet de bord — un `matchStrings` qui ne matche pas est inerte — et
   // vérifié au 2026-08-11 : seul `multica-runtime` porte ces trois épingles.
   // Ajouter un manager ici, ce n'est donc pas « configurer un dépôt », c'est
-  // déclarer un MOTIF que tout dépôt peut adopter en écrivant la ligne.
+  // déclarer un MOTIF que d'autres dépôts peuvent adopter.
+  //
+  // ⚠️ MAIS L'ADOPTION A UN CONTRAT DE NOMMAGE, et son non-respect est SILENCIEUX.
+  // `managerFilePatterns` est un regex ancré sur le chemin COMPLET relatif au
+  // dépôt, pas un simple nom de fichier. Un `docker/Dockerfile` ou un workflow
+  // nommé `ci.yml` ne matcherait pas un motif écrit pour la racine — sans erreur,
+  // sans PR, exactement la panne que ce bloc existe pour supprimer. Les motifs
+  // ci-dessous sont donc volontairement PERMISSIFS sur l'emplacement (Dockerfile
+  // à n'importe quelle profondeur, n'importe quel workflow) et stricts sur le
+  // contenu. Ce dépôt-ci est son propre contre-exemple : son Dockerfile est en
+  // `python-slim/Dockerfile` et son workflow s'appelle `build-python-slim.yml`.
   // ═══════════════════════════════════════════════════════════════════════════
   customManagers: [
     {
@@ -81,7 +98,7 @@ module.exports = {
       // contrôle délibéré (une release GitHub est MUTABLE).
       description: "ARG MULTICA_VERSION (Dockerfile) — daemon multica",
       customType: "regex",
-      managerFilePatterns: ["/^Dockerfile$/"],
+      managerFilePatterns: ["/(^|/)Dockerfile$/"],
       matchStrings: ["ARG MULTICA_VERSION=(?<currentValue>.*?)\\n"],
       depNameTemplate: "multica-ai/multica",
       datasourceTemplate: "github-releases",
@@ -97,7 +114,7 @@ module.exports = {
       // partie du numéro : `versioning: deb` est requis pour l'ordonner.
       description: "ARG CLAUDE_CODE_VERSION (Dockerfile) — CLI Claude Code, canal apt stable",
       customType: "regex",
-      managerFilePatterns: ["/^Dockerfile$/"],
+      managerFilePatterns: ["/(^|/)Dockerfile$/"],
       matchStrings: ["ARG CLAUDE_CODE_VERSION=(?<currentValue>.*?)\\n"],
       depNameTemplate: "claude-code",
       datasourceTemplate: "deb",
@@ -112,8 +129,8 @@ module.exports = {
       // vert sans plus rien prouver.
       description: "TRIVY_VERSION (workflow de build) — scanner d'images",
       customType: "regex",
-      managerFilePatterns: ["/^\\.github/workflows/build\\.yml$/"],
-      matchStrings: ["TRIVY_VERSION: \"(?<currentValue>.*?)\""],
+      managerFilePatterns: ["/^\\.github/workflows/.*\\.ya?ml$/"],
+      matchStrings: ["TRIVY_VERSION: *[\"']?(?<currentValue>[^\"'\\s]+)[\"']?"],
       depNameTemplate: "aquasecurity/trivy",
       datasourceTemplate: "github-releases",
       extractVersionTemplate: "^v(?<version>.*)$",
@@ -197,6 +214,40 @@ module.exports = {
       matchManagers: ["pip_requirements", "pep621"],
       matchUpdateTypes: ["major"],
       automerge: false,
+    },
+    // ═════════════════════════════════════════════════════════════════════════
+    // Épingles regex — la famille 4. ⚠️ ÉCRITE EXPLICITEMENT, ET C'EST LE POINT :
+    // toutes les règles ci-dessus gatent sur `matchManagers`, or un dep extrait
+    // par un manager regex se déclare `custom.regex` et ne matche AUCUNE d'entre
+    // elles. Sans cette règle, la famille n'hériterait de rien — pas de
+    // maturation supply-chain, pas de revue des majeurs — soit exactement
+    // l'inverse de la politique appliquée partout ailleurs, et sans que rien
+    // ne le signale.
+    // ═════════════════════════════════════════════════════════════════════════
+    {
+      // Maturation supply-chain, comme pip/pep621 : on n'ouvre pas de PR sur une
+      // version publiée il y a moins de 3 jours (protection contre un paquet
+      // compromis ou retiré juste après publication). ⚠️ Utile ici en
+      // particulier : `claude-code` publie très fréquemment, et sans ce délai la
+      // PR serait rebasée en permanence pour du bruit.
+      description: "Épingles regex — maturation 3j, JAMAIS d'automerge",
+      matchManagers: ["custom.regex"],
+      minimumReleaseAge: "3 days",
+      internalChecksFilter: "strict",
+      // ⚠️ Pas d'automerge, à dessein, et contrairement aux trois autres familles.
+      // Ce que ces épingles gouvernent n'est pas une dépendance applicative
+      // ordinaire : le daemon qui EXÉCUTE les tâches de l'agent, la CLI qu'il
+      // fait tourner, et le scanner censé prouver que l'image est saine. Et le
+      // bump de multica part ROUGE par construction (hash non calculable) : un
+      // automerge n'aurait de toute façon jamais lieu, mais mieux vaut que ce
+      // soit une décision qu'un effet de bord.
+      automerge: false,
+    },
+    {
+      description: "Épingles regex — majeur : revue via Dependency Dashboard",
+      matchManagers: ["custom.regex"],
+      matchUpdateTypes: ["major"],
+      dependencyDashboardApproval: true,
     },
   ],
 };
