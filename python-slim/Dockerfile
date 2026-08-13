@@ -19,33 +19,46 @@ RUN apt-get update \
  && groupadd --gid 65532 nonroot \
  && useradd --uid 65532 --gid 65532 --create-home --home-dir /home/nonroot nonroot
 
-# pip est RETIRÉ de ce socle. Ce n'est pas une économie de taille, c'est ce qui rend
-# le gate Trivy tenable : pip EMBARQUE ses dépendances dans `pip/_vendor`, et le
-# `vendor.txt` de pip 26.2.1 y épingle `msgpack==1.1.2` et `setuptools==70.3.0` —
-# deux CVE HIGH *corrigeables*, donc bloquantes, et qu'aucun geste dans l'image ne
-# corrige : un `pip install --upgrade setuptools` pose une SECONDE copie dans
-# site-packages et laisse `_vendor` intact. Le gate a été rouge 8 nuits pour ça
-# (2026-08-06 → 2026-08-13), sans que rien ne le signale.
+# pip est RETIRÉ de ce socle d'exécution, et l'invariant est STRUCTUREL, pas lié à
+# une CVE du moment : **pip embarque ses propres dépendances** (`pip/_vendor`), donc
+# un socle qui porte pip porte en permanence les CVE de ce qu'il vendore — et aucune
+# commande à l'intérieur de l'image ne peut les corriger, un `pip install --upgrade`
+# posant une SECONDE copie dans site-packages et laissant `_vendor` intact. Le seul
+# geste qui les supprime est celui-ci. (L'occurrence qui a motivé le retrait, avec
+# ses numéros et ses dates, est dans le commit et dans #3913 — pas ici, où elle
+# rotterait et ferait croire que la raison a disparu une fois ces CVE corrigées.)
 #
-# Aucun consommateur n'y perd : les trois (dev-finops-app, multica-runtime et le
-# gabarit soma-app-template) résolvent leurs dépendances en stage *builder* puis
-# copient — vérifié par balayage des 154 dépôts non archivés de l'org.
+# ⚠️ PRÉREQUIS, et rien ne le garantit mécaniquement : aucun consommateur de ce socle
+# ne doit invoquer pip à l'EXÉCUTION — tous doivent résoudre leurs dépendances en
+# stage *builder* puis `COPY --from`. Vérifié dépôt par dépôt le 2026-08-13. À
+# revérifier avant tout changement ici, par balayage `^FROM.*base/python-slim` de
+# l'org — en lisant le STAGE où vit le `pip install`, pas sa seule présence : un
+# builder et un runtime produisent la même ligne et ont des sens opposés.
+#
+# ⚠️ Conséquence à connaître : `python -m venv` ne fonctionne plus dans les images
+# dérivées (« ensurepip is not available »), sauf `--without-pip`.
 #
 # ⚠️ `ensurepip` doit partir AUSSI, sinon le retrait est cosmétique : il embarque une
-# roue pip complète — donc les mêmes copies vendorées, que Trivy voit — et un simple
-# `python -m ensurepip` réinstallerait le tout.
+# roue pip COMPLÈTE, donc les mêmes copies vendorées, et `python -m ensurepip` les
+# restaure. ⚠️ Et Trivy ne les y voit PAS — son analyseur `python-pkg` lit les
+# `.dist-info`, pas l'intérieur d'un `.whl` (mesuré : sur l'image amont il énumère
+# 19 paquets python et un SEUL porte un chemin, celui de pip ; si la roue embarquée
+# était ouverte, msgpack apparaîtrait deux fois puisqu'elle est de la même version).
+# C'est précisément ce qui rend le laisser dangereux : le gate resterait VERT.
 #
-# ⚠️ Les deux dernières lignes sont des ASSERTIONS, pas du zèle. Un `rm -rf` dont le
-# glob ne matche rien réussit en silence : sans elles, un changement de disposition
-# amont (chemin de site-packages, version mineure) laisserait pip en place et le
-# socle repartirait vulnérable, vert au build et rouge seulement au gate — c'est-à-dire
-# diagnostiqué comme « encore une CVE amont » plutôt que comme un retrait qui a raté.
+# ⚠️ Les trois assertions finales ne sont pas du zèle, et il en faut trois. Un
+# `rm -rf` dont le glob ne matche rien réussit en silence : si une disposition amont
+# change (préfixe, mineure), les `rm` deviennent des no-op tandis que le
+# `pip uninstall` — qui, lui, n'est pas un glob — réussit quand même. Sans
+# l'assertion `ensurepip`, ce cas passerait au VERT en laissant la roue en place,
+# c'est-à-dire exactement la panne muette que ce bloc existe pour supprimer.
 RUN python -m pip uninstall --yes pip \
  && rm -rf /usr/local/lib/python*/ensurepip \
            /usr/local/lib/python*/site-packages/pip* \
            /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.* \
  && ! command -v pip \
- && ! python -c "import pip"
+ && ! python -c "import pip" \
+ && ! python -c "import ensurepip"
 
 ENV HOME=/home/nonroot \
     PYTHONUNBUFFERED=1 \
