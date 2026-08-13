@@ -1,0 +1,36 @@
+# Exceptions Trivy du socle — DATÉES, JUSTIFIÉES, et scopées au paquet précis.
+#
+# ⚠️ Ce fichier n'est PAS auto-détecté : la fonctionnalité est expérimentale et
+# exige `--ignorefile` explicite (cf. build-python-slim.yml). Le poser sans le
+# flag donne une exception qui ne s'applique jamais — et un gate qu'on croit
+# arbitré alors qu'il est simplement resté rouge.
+vulnerabilities:
+  # msgpack et setuptools ne sont PAS installés dans l'image : ils sont EMBARQUÉS
+  # dans pip (`pip/_vendor/vendor.txt` de pip 26.2.1 les épingle à exactement ces
+  # deux versions). Conséquences, toutes vérifiées le 2026-08-13 :
+  #   - un `pip install --upgrade setuptools` ne les corrige PAS : il poserait une
+  #     seconde copie dans site-packages et laisserait `pip/_vendor` intact ;
+  #   - ce code n'est atteignable que quand pip lui-même s'exécute, ce qu'aucun
+  #     consommateur du socle ne fait à l'exécution (les deux installent leurs
+  #     dépendances en stage builder puis copient) ;
+  #   - la couche Debian, elle, est SAINE (0 vulnérabilité os-pkgs).
+  #
+  # ⚠️ EXCEPTION DE TRANSITION, PAS UN ARBITRAGE. Le correctif de fond est le
+  # retrait de pip du socle d'exécution — ce fichier disparaît avec lui. La date
+  # ci-dessous est un garde-fou : passée cette date le gate redevient rouge, ce
+  # qui est le comportement voulu si le correctif n'a pas abouti.
+  - id: GHSA-6v7p-g79w-8964
+    purls:
+      - "pkg:pypi/msgpack"
+    expired_at: 2026-09-30
+    statement: >-
+      Embarque dans pip (pip/_vendor), non atteignable a l'execution : aucun
+      consommateur du socle n'invoque pip au runtime. Leve par le retrait de pip
+      du socle.
+  - id: CVE-2025-47273
+    purls:
+      - "pkg:pypi/setuptools"
+    expired_at: 2026-09-30
+    statement: >-
+      Embarque dans pip (pip/_vendor/vendor.txt epingle setuptools==70.3.0), non
+      corrigeable par un upgrade dans l'image. Leve par le retrait de pip du socle.

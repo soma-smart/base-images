@@ -46,10 +46,16 @@ jobs:
             -t "registry-dev.soma-smart.cloud/base/python-slim:${VERSION}" \
             -f python-slim/Dockerfile python-slim
       - name: Trivy gate (CVE fixable Critical/High = échec)
+        # ⚠️ `--ignorefile` est OBLIGATOIRE pour que `.trivyignore.yaml` soit lu :
+        # le format YAML est expérimental et n'est PAS auto-détecté (seul le
+        # `.trivyignore` texte l'est). Poser le fichier sans ce flag donne une
+        # exception qui ne s'applique jamais — et personne ne le verrait, puisque
+        # le symptôme est un gate rouge, exactement ce qu'on observait déjà.
         env:
           VERSION: ${{ matrix.version }}
         run: |
-          trivy image --ignore-unfixed --severity CRITICAL,HIGH --exit-code 1 \
+          trivy image --ignorefile .trivyignore.yaml \
+            --ignore-unfixed --severity CRITICAL,HIGH --exit-code 1 \
             "registry-dev.soma-smart.cloud/base/python-slim:${VERSION}"
       - name: Push (idempotent — no-op si digest inchangé)
         env:
