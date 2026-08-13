@@ -28,6 +28,28 @@ module.exports = {
   // Dashboard actif : surface les "Dependency Lookup Warnings" (ex. échec d'auth
   // Harbor sur hostRules) qui, sinon, rendent la boucle muette sans erreur de job.
   dependencyDashboard: true,
+  // ⚠️ DÉSACTIVE l'écriture du statut de commit `renovate/stability-days`, et ce
+  // n'est pas cosmétique : sans ça, la maturation `minimumReleaseAge` BLOQUE les
+  // mises à jour au lieu de les retarder.
+  //
+  // Mécanique, mesurée le 2026-08-13 sur une passe en `debug` : dès qu'une
+  // dépendance soumise à maturation obtient une branche, Renovate publie un statut
+  // de commit pour la refléter. L'App `soma-base-bumper` a `statuses: READ` — le
+  // POST est refusé (« Resource not accessible by integration »), Renovate
+  // journalise « Caught error setting branch status - aborting » et **abandonne le
+  // dépôt AVANT de créer la PR**. La branche existe, la PR jamais. Le job de la
+  // passe reste **vert**, et l'absence de PR est indiscernable d'un « rien à mettre
+  // à jour » : trois mises à jour dormaient ainsi (ruff, azure-identity, outline).
+  //
+  // ⚠️ Ceci ne désactive PAS la maturation : le contrôle interne continue de retenir
+  // la PR jusqu'à l'âge requis. Seule la *publication du statut* disparaît — un
+  // affichage, pas une garantie.
+  // ⚠️ Alternative écartée : accorder `statuses: write` à l'App. Ça marcherait, mais
+  // ça élargit les droits d'un bot pour produire un affichage. Si la permission est
+  // accordée un jour pour une autre raison, cette ligne pourra sauter.
+  statusCheckNames: {
+    minimumReleaseAge: null,
+  },
   // Le bump de digest de base ne doit jamais etre rate-limite (sinon un rebuild DHI
   // peut attendre des heures derriere d'autres PR). 0 = illimite.
   prHourlyLimit: 0,
