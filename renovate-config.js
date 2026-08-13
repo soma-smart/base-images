@@ -216,6 +216,49 @@ module.exports = {
       automerge: false,
     },
     // ═════════════════════════════════════════════════════════════════════════
+    // Outline — cinquième famille. Le `FROM` de `soma-smart/outline` suit l'image
+    // d'entreprise TIERCE ; son bump déclenche `build-and-bump.yml`, qui rebuild,
+    // VÉRIFIE le crack de licence, pousse sur Harbor en `<version>-soma` et ouvre
+    // la PR de bump dans l'infra.
+    //
+    // ⚠️ CES RÈGLES SONT ICI PARCE QU'ELLES NE SERVIRAIENT À RIEN DANS LE DÉPÔT.
+    // `soma-smart/outline` porte depuis le 2026-06-29 un `renovate.json` correct
+    // (mêmes deux règles) que `requireConfig: "ignored"` rend INERTE. Personne ne
+    // l'a vu : le dépôt est resté hors de tout périmètre Renovate — ni ici, ni côté
+    // App Mend — et Outline a filé de 1.8.1 à 1.9.2 (trois versions, cinq semaines)
+    // sans une seule PR. Même panne que multica-runtime, même cause.
+    // ⚠️ Cette config ne fait RIEN tant que l'App `soma-base-bumper` n'est pas
+    // installée sur `soma-smart/outline` : `autodiscover` ne voit que ses
+    // installations. Détection du cas général : #3913.
+    //
+    // ⚠️ Le gate de ce bump est POST-MERGE, contrairement aux trois autres familles
+    // dont le gate est un check de PR. C'est inhérent à la chaîne : la vérification
+    // du crack exige de CONSTRUIRE l'image, et `build-and-bump.yml` ne se déclenche
+    // que sur `push` vers `main` (`paths: ["Dockerfile"]`). Un gate rouge n'empêche
+    // donc pas le merge, il arrête la publication — pas de push Harbor, pas de PR
+    // infra. Ne pas « réparer » ça en retirant l'automerge : ça figerait Outline
+    // sans rien protéger de plus.
+    {
+      description:
+        "Outline enterprise — mineur/patch : automerge (matures 3j). Gate = build-and-bump POST-merge.",
+      matchManagers: ["dockerfile"],
+      matchPackageNames: ["docker.getoutline.com/outlinewiki/outline-enterprise"],
+      matchUpdateTypes: ["minor", "patch"],
+      automerge: true,
+      automergeType: "pr",
+      platformAutomerge: false,
+      minimumReleaseAge: "3 days",
+      internalChecksFilter: "strict",
+    },
+    {
+      description:
+        "Outline enterprise — majeur : revue via Dependency Dashboard (variables d'env et config peuvent changer)",
+      matchManagers: ["dockerfile"],
+      matchPackageNames: ["docker.getoutline.com/outlinewiki/outline-enterprise"],
+      matchUpdateTypes: ["major"],
+      dependencyDashboardApproval: true,
+    },
+    // ═════════════════════════════════════════════════════════════════════════
     // Épingles regex — la famille 4. ⚠️ ÉCRITE EXPLICITEMENT, ET C'EST LE POINT :
     // toutes les règles ci-dessus gatent sur `matchManagers`, or un dep extrait
     // par un manager regex se déclare `custom.regex` et ne matche AUCUNE d'entre
