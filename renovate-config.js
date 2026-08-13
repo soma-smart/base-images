@@ -231,18 +231,34 @@ module.exports = {
     // installée sur `soma-smart/outline` : `autodiscover` ne voit que ses
     // installations. Détection du cas général : #3913.
     //
-    // ⚠️ Le gate de ce bump est POST-MERGE, contrairement aux trois autres familles
-    // dont le gate est un check de PR. C'est inhérent à la chaîne : la vérification
-    // du crack exige de CONSTRUIRE l'image, et `build-and-bump.yml` ne se déclenche
-    // que sur `push` vers `main` (`paths: ["Dockerfile"]`). Un gate rouge n'empêche
-    // donc pas le merge, il arrête la publication — pas de push Harbor, pas de PR
-    // infra. Ne pas « réparer » ça en retirant l'automerge : ça figerait Outline
-    // sans rien protéger de plus.
+    // ⚠️ L'automerge est ADOSSÉ À UN VRAI GATE, et il a fallu le créer : le workflow
+    // ne se déclenchait que sur `push`, donc une PR de bump n'avait AUCUN check et
+    // était mergée aussitôt. Un gate rouge après merge est muet — pas de publication,
+    // aucun humain notifié (l'auteur du push est un bot), et le `Dockerfile` de `main`
+    // portant déjà la version neuve, Renovate la considère à jour et ne la repropose
+    // JAMAIS. `build-and-bump.yml` tourne désormais aussi sur `pull_request` (build +
+    // vérification du crack, sans push) : c'est ce check que cet automerge attend.
+    //
+    // ⚠️ Les DEUX formes du nom sont listées à dessein. Le `FROM` cible
+    // `index.docker.io/…`, et Renovate normalise les références Docker Hub : selon la
+    // version, le nom porté par la règle est le chemin complet ou la forme courte. Un
+    // `matchPackageNames` qui ne matche pas est un no-op SILENCIEUX — exactement la
+    // panne qu'on corrige — alors qu'un nom listé en trop est simplement inerte.
+    // ⚠️ Et surtout : ne PAS y remettre `docker.getoutline.com`. Cet hôte, pourtant
+    // celui que documente l'éditeur, n'est qu'une redirection 302 vers Docker Hub, et
+    // `got` (client HTTP de Renovate) largue l'en-tête `Authorization` au rebond
+    // cross-origine : le listing des tags répond 401, Renovate ne voit aucune release
+    // et son job reste VERT. Mesuré le 2026-08-13. Le `FROM` a été déplacé sur
+    // `index.docker.io` pour cette raison — les deux vont ensemble.
     {
       description:
-        "Outline enterprise — mineur/patch : automerge (matures 3j). Gate = build-and-bump POST-merge.",
+        "Outline enterprise — mineur/patch : automerge (matures 3j), gaté par le check de PR de build-and-bump",
       matchManagers: ["dockerfile"],
-      matchPackageNames: ["docker.getoutline.com/outlinewiki/outline-enterprise"],
+      matchPackageNames: [
+        "index.docker.io/outlinewiki/outline-enterprise",
+        "docker.io/outlinewiki/outline-enterprise",
+        "outlinewiki/outline-enterprise",
+      ],
       matchUpdateTypes: ["minor", "patch"],
       automerge: true,
       automergeType: "pr",
@@ -254,7 +270,11 @@ module.exports = {
       description:
         "Outline enterprise — majeur : revue via Dependency Dashboard (variables d'env et config peuvent changer)",
       matchManagers: ["dockerfile"],
-      matchPackageNames: ["docker.getoutline.com/outlinewiki/outline-enterprise"],
+      matchPackageNames: [
+        "index.docker.io/outlinewiki/outline-enterprise",
+        "docker.io/outlinewiki/outline-enterprise",
+        "outlinewiki/outline-enterprise",
+      ],
       matchUpdateTypes: ["major"],
       dependencyDashboardApproval: true,
     },
