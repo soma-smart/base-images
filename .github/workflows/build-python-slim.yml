@@ -7,6 +7,16 @@ on:
   schedule:
     - cron: "0 3 * * *"   # 03:00 UTC (après le mirror DHI de 02:00)
   workflow_dispatch: {}
+  # ⚠️ Une modification du socle qui ne se vérifie qu'APRÈS le merge se vérifie en
+  # production : la seule façon de savoir si le Dockerfile construit encore était de
+  # merger puis de déclencher à la main. On construit donc aussi sur PR — sans
+  # publier, cf. la garde `github.event_name` sur le step Push.
+  # `paths` restreint le déclenchement à ce qui peut réellement casser le build : une
+  # PR Renovate sur `renovate-config.js` n'a pas à réveiller un runner ARC.
+  pull_request:
+    paths:
+      - "python-slim/**"
+      - ".github/workflows/build-python-slim.yml"
 concurrency:
   group: build-python-slim
   cancel-in-progress: false
@@ -32,6 +42,9 @@ jobs:
           DOCKERHUB_PAT: ${{ secrets.DOCKERHUB_PAT }}
         run: echo "$DOCKERHUB_PAT" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
       - name: Login Harbor (push base)
+        # Inutile sur une PR, qui ne publie pas — et le dire ici prouve que le chemin
+        # de PR n'a besoin d'aucun credential d'écriture sur le registre.
+        if: github.event_name != 'pull_request'
         env:
           HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
           HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
@@ -131,6 +144,10 @@ jobs:
           print(f"aucune vulnérabilité bloquante — {paquets} paquets OS comparés.")
           PY
       - name: Push (idempotent — no-op si digest inchangé)
+        # ⚠️ JAMAIS sur une PR : une PR construit et scanne pour prouver que le socle
+        # tient encore, elle ne publie pas. Publier depuis une branche non mergée
+        # redigesterait le tag mouvant que tous les consommateurs épinglent.
+        if: github.event_name != 'pull_request'
         env:
           VERSION: ${{ matrix.version }}
         run: docker push "registry-dev.soma-smart.cloud/base/python-slim:${VERSION}"
@@ -153,7 +170,12 @@ jobs:
         # ⚠️ La matrice ne porte qu'une version. Si elle s'élargit, une URL unique
         # ferait qu'un succès `3.15` masquerait un échec `3.14` — prévoir alors une
         # check par version, pas un ping partagé.
-        if: always()
+        #
+        # ⚠️ Exclu sur PR, et ce n'est pas un détail : un succès de PR pingerait la
+        # check et REPOUSSERAIT l'échéance du dead-man's switch — une nuit rouge
+        # passerait alors inaperçue parce que quelqu'un a ouvert une PR verte entre
+        # deux. Le signal doit rester celui de l'exécution qui publie.
+        if: always() && github.event_name != 'pull_request'
         env:
           HC_URL: ${{ secrets.HEALTHCHECKS_URL_BUILD_PYTHON_SLIM }}
           RESULTAT: ${{ job.status }}
