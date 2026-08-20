@@ -13,8 +13,39 @@
 ARG PY_VERSION=3.14
 FROM python:${PY_VERSION}-slim
 
+# ⚠️ `dist-upgrade` AVANT tout le reste, et ce n'est pas du confort. Sans lui, ce socle
+# ne peut appliquer un correctif de sécurité Debian qu'en ATTENDANT que Docker Hub
+# reconstruise `python:<ver>-slim` — une cadence sur laquelle nous n'avons aucune prise.
+# Le délai n'est pas théorique : du 2026-08-17 au 20, DSA-6442-1 (util-linux 2.41-5 →
+# 2.41.5-0+deb13u1) a mis 9 CVE HIGH corrigeables dans l'image amont. Le gate a refusé
+# la base — correctement — donc la base ne s'est plus republiée, donc son digest s'est
+# figé, donc PLUS AUCUN consommateur du socle n'a pu produire une image verte. Quatre
+# nuits, en silence. Un socle qui gate sur les CVE corrigeables doit pouvoir les
+# corriger lui-même, sinon son gate se retourne contre lui.
+#
+# `dist-upgrade` et NON `upgrade` : `upgrade` retient (« held back ») tout paquet dont
+# la mise à jour tire une nouvelle dépendance — un correctif de sécurité qui le fait
+# passerait donc à la trappe. Le risque symétrique de `dist-upgrade` (retrait de
+# paquets) est borné : on reste dans une même version stable, et l'assertion ci-dessous
+# refuse tout reliquat.
+#
+# ⚠️ L'assertion qui suit le `dist-upgrade` n'est pas du zèle : un paquet laissé en
+# attente ne dit RIEN — `apt-get` sort 0 et la ligne « not upgraded » se noie dans le
+# log. On rejoue donc la mise à jour À BLANC et on exige que plus rien ne bouge. Sans
+# elle, le seul filet serait le gate Trivy, qui ne voit que ce qui est DÉJÀ publié
+# comme CVE — jamais un correctif simplement pas appliqué.
+#
+# ⚠️ Ceci rend le build NON REPRODUCTIBLE — assumé, et déjà vrai : le tag est mouvant
+# par construction (rebuild nocturne, `--pull` sur un `FROM` non épinglé, cf. en-tête).
+# L'immutabilité ne vit pas ici, elle vit chez le consommateur, dans son digest-pin.
 RUN apt-get update \
+ && apt-get -y --no-install-recommends dist-upgrade \
  && apt-get install -y --no-install-recommends libgomp1 \
+ && apt-get -s -y dist-upgrade > /tmp/upgrade-simule.txt \
+ && { grep -qE '^0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded\.' /tmp/upgrade-simule.txt \
+      || { echo "ERREUR: des mises a jour restent en attente apres dist-upgrade :" >&2; \
+           tail -3 /tmp/upgrade-simule.txt >&2; exit 1; }; } \
+ && rm -f /tmp/upgrade-simule.txt \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --gid 65532 nonroot \
  && useradd --uid 65532 --gid 65532 --create-home --home-dir /home/nonroot nonroot
