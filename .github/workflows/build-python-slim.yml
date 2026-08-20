@@ -45,13 +45,133 @@ jobs:
             --build-arg PY_VERSION="$VERSION" \
             -t "registry-dev.soma-smart.cloud/base/python-slim:${VERSION}" \
             -f python-slim/Dockerfile python-slim
-      - name: Trivy gate (CVE fixable Critical/High = échec)
+      - name: Trivy gate (couverture PROUVÉE, puis CVE fixable Critical/High = échec)
+        # ⚠️ Le verdict est rendu en Python, PAS par `--exit-code 1`. Un scan qui
+        # n'analyse RIEN sort 0 : le gate serait alors vert par AVEUGLEMENT, et un
+        # gate incapable de distinguer « rien trouvé » de « rien cherché » ne prouve
+        # rien. Le risque est concret ICI : ce socle retire déjà pip et ensurepip, et
+        # tout allègement futur de sa base de paquets produirait exactement ce cas.
+        #
+        # ⚠️ « L'OS a été identifié » NE SUFFIT PAS : la détection lit
+        # `/etc/os-release`, indépendamment de toute énumération de paquets. On asserte
+        # donc l'INVENTAIRE : un `os-pkgs` non vide. Portage du gate de
+        # soma-smart/multica-runtime, où ces trois pièges sont documentés en détail.
+        #
+        # ⚠️ Aucun mécanisme d'exception ici, et c'est délibéré : une base est le seul
+        # endroit où une CVE corrigeable se corrige VRAIMENT (cf. le `dist-upgrade` du
+        # Dockerfile). Une porte de tolérance posée sur le socle deviendrait opposable
+        # à tous ses consommateurs d'un coup.
         env:
           VERSION: ${{ matrix.version }}
         run: |
-          trivy image --ignore-unfixed --severity CRITICAL,HIGH --exit-code 1 \
-            "registry-dev.soma-smart.cloud/base/python-slim:${VERSION}"
+          set -eu
+          IMAGE="registry-dev.soma-smart.cloud/base/python-slim:${VERSION}"
+          trivy image --format json --list-all-pkgs \
+            --ignore-unfixed --severity CRITICAL,HIGH \
+            "$IMAGE" > trivy.json
+
+          ATTENDU="$IMAGE" python3 - <<'PY'
+          import json, os, sys
+
+          attendu = os.environ["ATTENDU"]
+          with open("trivy.json") as f:
+              rapport = json.load(f)
+
+          def refus(msg):
+              sys.exit(f"ERREUR: {msg}")
+
+          # Le schéma d'abord : un changement de format amont transformerait toutes les
+          # assertions suivantes en lectures de clés absentes, donc en silence.
+          schema = rapport.get("SchemaVersion")
+          if schema != 2:
+              refus(f"schéma de rapport Trivy inattendu ({schema!r}, attendu 2) — "
+                    "les assertions ci-dessous ne veulent plus rien dire.")
+
+          artefact = rapport.get("ArtifactName")
+          if artefact != attendu:
+              refus(f"Trivy a scanné '{artefact}', attendu '{attendu}'.")
+
+          meta = rapport.get("Metadata") or {}
+          os_info = meta.get("OS") or {}
+          famille = os_info.get("Family")
+          if not famille:
+              refus("Trivy n'a identifié aucun OS dans l'image.")
+
+          resultats = rapport.get("Results") or []
+          paquets = max(
+              (len(r.get("Packages") or []) for r in resultats if r.get("Class") == "os-pkgs"),
+              default=0,
+          )
+          if paquets == 0:
+              refus("aucun paquet OS énuméré. Trivy a reconnu l'OS mais n'a comparé "
+                    "AUCUN paquet aux avis de sécurité — base dpkg absente ou vide. "
+                    "Le rapport est vide par aveuglement, pas par propreté.")
+
+          if os_info.get("EOSL"):
+              refus(f"la distribution ({famille} {os_info.get('Name')}) est en FIN DE "
+                    "SUPPORT : plus aucun avis n'est publié, un scan vert ne prouve "
+                    "plus rien. Changer de base amont.")
+
+          print(f"couverture OK — artefact={artefact} os={famille} {os_info.get('Name')} "
+                f"paquets={paquets} cibles={len(resultats)}")
+
+          bloquantes = [(c.get("Target"), v) for c in resultats
+                        for v in (c.get("Vulnerabilities") or [])]
+          if bloquantes:
+              for cible, v in bloquantes:
+                  print(f"  {v['Severity']:8} {v['VulnerabilityID']:20} "
+                        f"{v.get('PkgName')} {v.get('InstalledVersion')} "
+                        f"→ {v.get('FixedVersion')}  [{cible}]")
+              refus(f"{len(bloquantes)} vulnérabilité(s) CRITICAL/HIGH corrigeable(s). "
+                    "Sur un SOCLE, elles se corrigent : vérifier d'abord que le "
+                    "`dist-upgrade` du Dockerfile a bien tout appliqué (le correctif "
+                    "Debian peut n'être pas encore publié), puis n'attendre l'amont "
+                    "qu'en dernier recours.")
+
+          print(f"aucune vulnérabilité bloquante — {paquets} paquets OS comparés.")
+          PY
       - name: Push (idempotent — no-op si digest inchangé)
         env:
           VERSION: ${{ matrix.version }}
         run: docker push "registry-dev.soma-smart.cloud/base/python-slim:${VERSION}"
+
+      - name: Signal de vie (dead-man's switch)
+        # ⚠️ Ce job a échoué QUATRE NUITS d'affilée (2026-08-17 → 20) sans que personne
+        # ne le sache, et c'est ce silence qui a coûté la panne : la base n'était plus
+        # republiée, donc plus aucun consommateur du socle ne pouvait produire une
+        # image verte. Un rouge que personne ne reçoit n'est pas une alerte, c'est une
+        # trace posthume.
+        #
+        # Healthchecks.io, comme le Watchdog de l'alerting : le ping de succès est ce
+        # qui compte, parce qu'il attrape AUSSI les pannes qu'un `if: failure()` ne
+        # verrait jamais — job qui ne démarre pas, runner ARC absent, cron désactivé,
+        # dépôt sorti de l'installation de l'App.
+        #
+        # ⚠️ `if: always()` est structurant : sans lui, le step serait sauté
+        # précisément quand il a quelque chose à dire.
+        #
+        # ⚠️ La matrice ne porte qu'une version. Si elle s'élargit, une URL unique
+        # ferait qu'un succès `3.15` masquerait un échec `3.14` — prévoir alors une
+        # check par version, pas un ping partagé.
+        if: always()
+        env:
+          HC_URL: ${{ secrets.HEALTHCHECKS_URL_BUILD_PYTHON_SLIM }}
+          RESULTAT: ${{ job.status }}
+        run: |
+          set -eu
+          if [ -z "${HC_URL:-}" ]; then
+            echo "::warning::Secret HEALTHCHECKS_URL_BUILD_PYTHON_SLIM absent : le dead-man's switch est INERTE, un échec nocturne n'alertera personne."
+            {
+              echo "### ⚠️ Dead-man's switch inerte"
+              echo
+              echo "Le secret \`HEALTHCHECKS_URL_BUILD_PYTHON_SLIM\` n'est pas défini."
+              echo "Ce build est surveillé par personne — cf. README, section « Surveillance »."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$RESULTAT" = "success" ]; then
+            curl -fsS -m 10 --retry 3 "$HC_URL" > /dev/null
+          else
+            curl -fsS -m 10 --retry 3 "$HC_URL/fail" > /dev/null
+          fi
+          echo "ping envoyé — statut $RESULTAT"

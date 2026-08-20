@@ -14,7 +14,7 @@ dhi.io/python:<ver>  ──(mirror nocturne)──▶  registry-dev.soma-smart.c
 
 - **Source DHI** : registre dédié **`dhi.io`** (PAS `docker.io/dhi`). Ex. `dhi.io/python:3.13`. Auth requise même en gratuit : `docker login dhi.io` avec identifiants Docker Hub + **PAT** comme mot de passe.
 - **Tag mouvant** : `base/python:<ver>` est **redigesté à chaque rebuild DHI**. L'immutabilité au pull est assurée côté consommateur par le **digest-pin** (`@sha256:…`), suivi automatiquement par Renovate.
-- **Gate Trivy** : avant push, `trivy image --ignore-unfixed --severity CRITICAL,HIGH --exit-code 1` échoue si une CVE fixable Critical/High subsiste → on ne propage jamais une base régressée.
+- **Gate Trivy** : avant push, une CVE fixable Critical/High fait échouer le job → on ne propage jamais une base régressée. ⚠️ **Les deux gates ne se valent pas** : `mirror-dhi` s'en remet encore à `trivy … --exit-code 1`, qui ne distingue pas « rien trouvé » de « rien cherché » ; `build-python-slim` rend désormais son verdict explicitement (couverture prouvée avant absence de CVE, cf. plus bas). Aligner le premier sur le second reste à faire.
 - **Versions maintenues** : `3.11`, `3.12`, `3.13`, `3.14` (union des versions utilisées par les apps).
 
 ## `base/python-slim` — base scientifique (non-distroless)
@@ -27,7 +27,10 @@ python:<ver>-slim  ──(build nocturne + libgomp1 + non-root 65532)──▶  
                         apps sci: FROM …/base/python-slim:<ver>@sha256:<digest>  (digest-pin Renovate)
 ```
 
-- `.github/workflows/build-python-slim.yml` — `docker build python-slim/Dockerfile` (`FROM python:<ver>-slim` **non pinné** + `--pull` → derniers patchs Debian) → gate Trivy → push. Même robot `base-pusher`, même runner, même tag mouvant + digest-pin consommateur que `base/python`.
+- `.github/workflows/build-python-slim.yml` — `docker build python-slim/Dockerfile` (`FROM python:<ver>-slim` **non pinné** + `--pull`) → gate Trivy durci → push. Même robot `base-pusher`, même runner, même tag mouvant + digest-pin consommateur que `base/python`.
+- **Le socle applique lui-même les correctifs Debian** (`apt-get dist-upgrade` au build). ⚠️ **Ce n'est pas redondant avec `--pull`** : `--pull` ne fait que reprendre le dernier `python:<ver>-slim` publié par Docker Hub, dont la cadence de reconstruction ne nous appartient pas. Sans le `dist-upgrade`, une DSA publiée aujourd'hui n'entre dans le socle que le jour où Docker Hub reconstruit — et le gate, lui, refuse la base **immédiatement**. C'est exactement l'interblocage vécu du 2026-08-17 au 20 (DSA-6442-1, `util-linux`) : gate rouge quatre nuits, base plus republiée, digest figé, **aucun consommateur du socle capable de produire une image verte**.
+- **Le gate ne peut pas être vert par aveuglement.** Le verdict n'est plus `trivy --exit-code 1` mais un contrôle explicite : schéma du rapport, artefact scanné, **inventaire de paquets OS non vide**, distribution non EOSL, puis absence de CVE. Un scan qui n'analyse rien sort `0` — sur un socle qui retire déjà pip et `ensurepip`, c'est un mode de panne réel, pas une hypothèse.
+- **Aucun mécanisme d'exception ici, à dessein** : une base est le seul endroit où une CVE corrigeable se corrige vraiment. Une porte de tolérance sur le socle serait opposable à tous ses consommateurs d'un coup.
 - Durcissement : **non-root uid 65532** (aligné DHI), `libgomp1` (OpenMP scipy/sklearn), UTF-8 forcé, pas de cache apt. Distroless-like côté sécurité mais garde un shell + glibc pour les wheels natives.
 - **Versions** : `3.14` (finops). Étendre la matrice quand une autre app scientifique arrive.
 - **Choisir la base** : app standard → `base/python` (distroless, le plus dur) ; app scientifique (scipy/sklearn/pandas lourd, ou qui invoque un binaire système) → `base/python-slim`.
@@ -46,8 +49,21 @@ python:<ver>-slim  ──(build nocturne + libgomp1 + non-root 65532)──▶  
    | `HARBOR_PASSWORD` | secret du robot `base-pusher` |
    | `DOCKERHUB_USERNAME` | compte Docker Hub (pull `dhi.io`) |
    | `DOCKERHUB_PAT` | PAT Docker Hub |
+   | `HEALTHCHECKS_URL_BUILD_PYTHON_SLIM` | URL de ping de la check Healthchecks.io du build nocturne (cf. « Surveillance ») |
 
 Une fois les deux prérequis en place, **décommenter le bloc `schedule`** dans le workflow.
+
+### Surveillance du build nocturne (dead-man's switch)
+
+`build-python-slim` a échoué **quatre nuits d'affilée** (2026-08-17 → 20) sans que personne ne le sache. Le coût n'a pas été l'échec — il était justifié — mais son **silence** : la base ne se republiait plus, son digest se figeait, et plus aucun consommateur du socle ne pouvait produire une image verte. La panne a été découverte par quelqu'un qui poussait du code sur un dépôt consommateur.
+
+Le workflow pinge donc une check **Healthchecks.io** à chaque exécution : l'URL nue en cas de succès, `<url>/fail` sinon. C'est le **ping de succès** qui porte la protection — il attrape aussi ce qu'un `if: failure()` ne verrait jamais : job qui ne démarre pas, runner ARC absent, `schedule` désactivé, dépôt sorti de l'installation de l'App GitHub.
+
+Mise en place, une fois : créer la check (période 1 j, grâce ~2 h — le cron est à 03:00 UTC), puis déposer son URL de ping dans le secret `HEALTHCHECKS_URL_BUILD_PYTHON_SLIM`.
+
+⚠️ **Tant que ce secret n'existe pas, le dispositif est INERTE** — et le workflow le dit à chaque run (annotation `::warning::` + encart dans le résumé du job) plutôt que de laisser croire à une protection en place.
+
+⚠️ **Une seule check pour toute la matrice.** Elle ne porte qu'une version aujourd'hui ; si elle s'élargit, un succès `3.15` masquerait un échec `3.14` — il faudra alors une check par version, pas un ping partagé.
 
 ---
 
