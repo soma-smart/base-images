@@ -157,6 +157,26 @@ module.exports = {
       datasourceTemplate: "github-releases",
       extractVersionTemplate: "^v(?<version>.*)$",
     },
+    {
+      // ⚠️ CELUI-CI N'A PAS DE HASH JUMEAU, contrairement à `MULTICA_VERSION` juste
+      // au-dessus — et il ne faut pas lui en chercher un. `gh` n'est pas téléchargé :
+      // il est COMPILÉ dans le dépôt consommateur (`go install <module>@v<VER>`), et
+      // c'est la toolchain Go qui vérifie le module contre `sum.golang.org`. Ses PR
+      // partiront donc VERTES. Un mainteneur habitué au rouge voulu de multica ne doit
+      // pas lire ce vert comme un contrôle manquant.
+      //
+      // ⚠️ Une seule ligne `ARG GH_VERSION=` existe côté consommateur, déclarée AVANT
+      // le premier FROM (portée globale) et re-déclarée nue dans les stages. Si
+      // quelqu'un en écrivait une seconde avec un `=`, ce motif matcherait les deux et
+      // ouvrirait des PR jumelles — symptôme à reconnaître plutôt qu'à déboguer.
+      description: "ARG GH_VERSION (Dockerfile) — CLI GitHub, compilé chez le consommateur",
+      customType: "regex",
+      managerFilePatterns: ["/(^|/)Dockerfile$/"],
+      matchStrings: ["ARG GH_VERSION=(?<currentValue>.*?)\\n"],
+      depNameTemplate: "cli/cli",
+      datasourceTemplate: "github-releases",
+      extractVersionTemplate: "^v(?<version>.*)$",
+    },
   ],
   // Creds Harbor privé pour résoudre le digest du tag mouvant base/python.
   hostRules: [
