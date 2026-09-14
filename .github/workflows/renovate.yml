@@ -48,3 +48,23 @@ jobs:
           HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
           HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
           LOG_LEVEL: ${{ inputs.logLevel || 'info' }}
+          # Journal STRUCTURÉ, en plus de la sortie console : l'étape suivante doit
+          # statuer sur des faits, pas sur du texte coloré par des séquences ANSI.
+          LOG_FILE: renovate-log.ndjson
+          LOG_FILE_LEVEL: info
+
+      # ⚠️ UN ÉCHEC DE LOOKUP NE DOIT PLUS ÊTRE SILENCIEUX. Quand une datasource ne
+      # résout pas, Renovate n'ouvre aucune PR et écrit un avertissement dans le CORPS
+      # de la Dependency Dashboard — le job reste VERT. L'épingle gèle alors comme si
+      # personne ne la suivait, et c'est indiscernable de « rien à mettre à jour ».
+      # Le rationale complet et les modes d'échec sont dans le script.
+      #
+      # ⚠️ `if: always()` : sans lui, un échec de Renovate lui-même sauterait le gate,
+      # et l'absence de gate se lirait comme une absence de problème.
+      #
+      # ⚠️ DÉLIBÉRÉMENT BRUYANT : une indisponibilité amont passagère rendra le job
+      # rouge le temps d'un run. Compromis assumé — un rouge qui se répare seul coûte
+      # un coup d'œil, un gel silencieux a coûté des semaines.
+      - name: Aucun échec de lookup (gate)
+        if: always()
+        run: python3 scripts/verifier-lookups.py renovate-log.ndjson
