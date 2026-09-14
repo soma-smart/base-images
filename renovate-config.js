@@ -121,7 +121,10 @@ module.exports = {
       description: "ARG MULTICA_VERSION (Dockerfile) — daemon multica",
       customType: "regex",
       managerFilePatterns: ["/(^|/)Dockerfile$/"],
-      matchStrings: ["ARG MULTICA_VERSION=(?<currentValue>.*?)\\n"],
+      // ⚠️ Ancré comme celui de GH_VERSION plus bas, et pour la même raison mesurée :
+      // un motif non ancré matche une ligne commentée. Défaut de famille, corrigé sur
+      // les deux motifs d'un coup plutôt que sur celui qui a mordu.
+      matchStrings: ["(?m)^\\s*ARG MULTICA_VERSION=(?<currentValue>[^\\s#]+)"],
       depNameTemplate: "multica-ai/multica",
       datasourceTemplate: "github-releases",
       extractVersionTemplate: "^v(?<version>.*)$",
@@ -137,7 +140,9 @@ module.exports = {
       description: "ARG CLAUDE_CODE_VERSION (Dockerfile) — CLI Claude Code, canal apt stable",
       customType: "regex",
       managerFilePatterns: ["/(^|/)Dockerfile$/"],
-      matchStrings: ["ARG CLAUDE_CODE_VERSION=(?<currentValue>.*?)\\n"],
+      // ⚠️ Ancré, comme les trois autres motifs de ce bloc : non ancré, il matcherait
+      // une ligne commentée. Cf. la mesure du 2026-09-14 sur GH_VERSION.
+      matchStrings: ["(?m)^\\s*ARG CLAUDE_CODE_VERSION=(?<currentValue>[^\\s#]+)"],
       depNameTemplate: "claude-code",
       datasourceTemplate: "deb",
       versioningTemplate: "deb",
@@ -152,7 +157,9 @@ module.exports = {
       description: "TRIVY_VERSION (workflow de build) — scanner d'images",
       customType: "regex",
       managerFilePatterns: ["/^\\.github/workflows/.*\\.ya?ml$/"],
-      matchStrings: ["TRIVY_VERSION: *[\"']?(?<currentValue>[^\"'\\s]+)[\"']?"],
+      // ⚠️ Ancré, même raison que les motifs Dockerfile de ce bloc : une ligne YAML
+      // commentée (`# TRIVY_VERSION: 0.60.0`) matcherait sinon.
+      matchStrings: ["(?m)^\\s*TRIVY_VERSION: *[\"']?(?<currentValue>[^\"'\\s]+)[\"']?"],
       depNameTemplate: "aquasecurity/trivy",
       datasourceTemplate: "github-releases",
       extractVersionTemplate: "^v(?<version>.*)$",
@@ -160,10 +167,21 @@ module.exports = {
     {
       // ⚠️ CELUI-CI N'A PAS DE HASH JUMEAU, contrairement à `MULTICA_VERSION` juste
       // au-dessus — et il ne faut pas lui en chercher un. `gh` n'est pas téléchargé :
-      // il est COMPILÉ dans le dépôt consommateur (`go install <module>@v<VER>`), et
-      // c'est la toolchain Go qui vérifie le module contre `sum.golang.org`. Ses PR
-      // partiront donc VERTES. Un mainteneur habitué au rouge voulu de multica ne doit
-      // pas lire ce vert comme un contrôle manquant.
+      // il est COMPILÉ dans le dépôt consommateur, par un module enveloppe
+      // (`go mod init` + `go get <PAQUET>@<ver>` + `go build`) — et c'est la toolchain
+      // Go qui vérifie contre `sum.golang.org`. Rien à recalculer à la main, donc.
+      //
+      // ⚠️ MAIS NE PAS EN CONCLURE QUE SES PR SERONT VERTES. Une première rédaction
+      // l'écrivait, et c'était une mauvaise promesse : le stage de build porte trois
+      // contrôles qui peuvent rendre un bump ROUGE — le gate Trivy (il a déjà refusé
+      // CVE-2026-56864/56865 le 2026-09-14), le plancher `go get golang.org/x/mod`, et
+      // l'assertion qui tue le build si ce plancher n'a pas pris effet. Un rouge ici
+      // est un gate qui travaille, pas une panne de la boucle : il se lit dans le
+      // `security-exceptions.json` du consommateur, jamais dans cette config.
+      //
+      // ⚠️ Le `/v2` du chemin Go est le suffixe de MAJEURE du module. Un bump vers
+      // `3.0.0` rendrait le `go get` du consommateur invalide — build rouge, donc
+      // auto-révélateur, et les majeurs passent de toute façon par le Dashboard.
       //
       // ⚠️ Une seule ligne `ARG GH_VERSION=` existe côté consommateur, déclarée AVANT
       // le premier FROM (portée globale) et re-déclarée nue dans les stages. Si
@@ -172,7 +190,12 @@ module.exports = {
       description: "ARG GH_VERSION (Dockerfile) — CLI GitHub, compilé chez le consommateur",
       customType: "regex",
       managerFilePatterns: ["/(^|/)Dockerfile$/"],
-      matchStrings: ["ARG GH_VERSION=(?<currentValue>.*?)\\n"],
+      // ⚠️ ANCRÉ EN DÉBUT DE LIGNE, et ce n'est pas cosmétique : un motif non ancré
+      // matche aussi une ligne COMMENTÉE. Mesuré le 2026-09-14 — le Dockerfile
+      // consommateur citait cet ARG dans une phrase d'avertissement, et Renovate en
+      // extrayait une dépendance fantôme versionnée avec le reste de la phrase. Le
+      // `[^\s#]` ferme au passage le commentaire de FIN de ligne, avalé sinon.
+      matchStrings: ["(?m)^\\s*ARG GH_VERSION=(?<currentValue>[^\\s#]+)"],
       depNameTemplate: "cli/cli",
       datasourceTemplate: "github-releases",
       extractVersionTemplate: "^v(?<version>.*)$",
@@ -218,6 +241,13 @@ module.exports = {
       description:
         "Builders publics jetes (CVE non shippees), volontairement non suivis",
       matchManagers: ["dockerfile"],
+      // ⚠️ SCOPÉ AUX STAGES INTERMÉDIAIRES, et c'est le point le plus important de
+      // cette règle. Sans `matchDepTypes`, elle désactive le suivi de `golang` et
+      // `python` PARTOUT, y compris sur un stage FINAL — donc sur une image
+      // réellement livrée. La panne serait muette : aucune PR, indiscernable de
+      // « rien à mettre à jour ». Le manager `dockerfile` distingue déjà les deux
+      // (`depType: "stage"` vs `"final"`), il suffit de le lui demander.
+      matchDepTypes: ["stage"],
       // ⚠️ `golang` y a ete ajoute avec le stage `gobuilder` de multica-runtime, et pas
       // par symetrie : sans cette entree, le manager `dockerfile` voit `golang:1.26`
       // (le defaut de BASE_REGISTRY est vide, le nom est donc nu) et ouvre des PR de
@@ -225,7 +255,18 @@ module.exports = {
       // EPINGLANT le tag, ce qui recreerait exactement le gel que ce stage existe pour
       // fuir : c'est la reliaison avec une stdlib fraiche, a chaque build, qui permet de
       // corriger une CVE stdlib de `gh` par un simple rebuild.
-      matchPackageNames: ["python", "golang"],
+      // ⚠️ `matchPackageNames` est en correspondance EXACTE : le nom nu ne couvre ni
+      // `docker.io/library/...` ni le chemin du proxy Harbor. Les formes sont donc
+      // listées, comme le fait déjà la règle Outline plus bas — sans quoi la règle
+      // dépendrait du `BASE_REGISTRY` vide d'un AUTRE dépôt, couplage invisible d'ici.
+      matchPackageNames: [
+        "python",
+        "golang",
+        "docker.io/library/python",
+        "docker.io/library/golang",
+        "registry-dev.soma-smart.cloud/dockerhub-proxy/library/python",
+        "registry-dev.soma-smart.cloud/dockerhub-proxy/library/golang",
+      ],
       enabled: false,
     },
     {
