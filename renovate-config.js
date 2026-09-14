@@ -160,15 +160,46 @@ module.exports = {
       // manager `github-actions` (qui ne lit que les `uses:`). Sans ce motif, le
       // scanner gèle et cesse de détecter les CVE récentes — un gate qui rend
       // vert sans plus rien prouver.
-      description: "TRIVY_VERSION (workflow de build) — scanner d'images",
+      //
+      // ⚠️ CE MOTIF SUIT L'IMAGE, PLUS LA RELEASE GITHUB, ET C'EST UNE CORRECTION DE
+      // PANNE. Il visait `github-releases` sur `aquasecurity/trivy` et échouait à
+      // CHAQUE run depuis des semaines : l'organisation amont a activé une IP allow
+      // list GitHub, qui rejette nos requêtes AUTHENTIFIÉES (message de GitHub :
+      // « the `aquasecurity` organization has an IP allow list enabled »). Le scanner
+      // de CVE de tout le parc est resté figé sans qu'aucun signal ne parte.
+      // ⚠️ Ni un PAT ni `GITHUB_COM_TOKEN` n'y changeraient rien : le filtre porte sur
+      // l'IP, pas sur le jeton. Mesuré — la même requête ANONYME, depuis la même IP,
+      // rend 200. Ne pas « réparer » ce motif en lui ajoutant un jeton.
+      //
+      // ⚠️ On suit désormais L'ARTEFACT RÉELLEMENT CONSOMMÉ : le workflow de build tire
+      // `dockerhub-proxy/aquasec/trivy:${TRIVY_VERSION}`. Surveiller autre chose que ce
+      // qu'on exécute rouvrirait un écart entre l'index et la réalité — et ça supprime
+      // toute dépendance à la politique IP d'un tiers, qui peut rechanger sans préavis.
+      //
+      // ⚠️ Deux mesures ont décidé, à ne pas re-supposer :
+      //   - le proxy Harbor expose la liste COMPLÈTE des tags amont (0.1.6 → 0.74.0),
+      //     pas seulement ceux déjà en cache — c'était la crainte principale, et elle
+      //     était infondée ;
+      //   - le versioning `docker` rend `isCompatible=false` pour `0.74.0-amd64`,
+      //     `-arm64` et `-s390x` face à `0.73.0` : aucune variante d'architecture ne
+      //     peut être proposée. Ne pas ajouter d'`allowedVersions` « au cas où ».
+      //
+      // ⚠️ Le listing du proxy répond en ANONYME (vérifié) — ce qui est heureux, car
+      // `HARBOR_USERNAME`/`HARBOR_PASSWORD` n'atteignent pas le conteneur (filtrés par
+      // l'`env-regex` de l'action). Ce défaut est traité à part ; ce motif n'en dépend
+      // pas, mais ne pas conclure de son bon fonctionnement que les credentials passent.
+      //
+      // ⚠️ Plus d'`extractVersion` : les tags de l'image sont nus (`0.74.0`), sans le
+      // `v` des tags Git. En conserver un ferait que rien ne matcherait plus — et un
+      // motif qui ne matche rien ne lève aucune erreur.
+      description: "TRIVY_VERSION (workflow de build) — scanner d'images, suivi via le proxy Harbor",
       customType: "regex",
       managerFilePatterns: ["/^\\.github/workflows/.*\\.ya?ml$/"],
       // ⚠️ Ancré, même raison que les motifs Dockerfile de ce bloc : une ligne YAML
       // commentée (`# TRIVY_VERSION: 0.60.0`) matcherait sinon.
       matchStrings: ["(?m)^\\s*TRIVY_VERSION: *[\"']?(?<currentValue>[^\"'\\s]+)[\"']?"],
-      depNameTemplate: "aquasecurity/trivy",
-      datasourceTemplate: "github-releases",
-      extractVersionTemplate: "^v(?<version>.*)$",
+      depNameTemplate: "registry-dev.soma-smart.cloud/dockerhub-proxy/aquasec/trivy",
+      datasourceTemplate: "docker",
     },
     {
       // ⚠️ CELUI-CI N'A PAS DE HASH JUMEAU, contrairement à `MULTICA_VERSION` juste
