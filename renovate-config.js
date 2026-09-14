@@ -350,7 +350,7 @@ module.exports = {
       // — pinné sur une BRANCHE, jamais un SHA. Le manager `github-actions` tente donc
       // de résoudre le digest courant (datasource `github-digest`) pour proposer
       // l'épinglage — la même politique que la famille 2 de ce fichier — et échoue à
-      // CHAQUE fois, sur les 8 consommateurs, sur toutes leurs branches : l'App
+      // CHAQUE fois, sur TOUS les consommateurs, sur toutes leurs branches : l'App
       // `soma-base-bumper` (`repository_selection: "selected"`) n'a jamais eu accès à
       // `infra-datacenter-docs`, un dépôt PRIVÉ. Message GitHub, retrouvé dans la trace
       // GraphQL complète (pas le résumé) : « Could not resolve to a Repository with the
@@ -371,12 +371,22 @@ module.exports = {
       // politique d'un AUTRE. Les 3 artefacts ont été nettoyés le jour même,
       // l'installation immédiatement retirée.
       //
-      // ⚠️ IL N'Y A DONC PAS DE VOIE « ACCÈS SCOPÉ AU SEUL DIGEST » DISPONIBLE ICI :
-      // `repository_selection: "selected"` d'une App GitHub est un accès au DÉPÔT,
-      // combiné à `autodiscover: true` ça devient un accès à SA GESTION COMPLÈTE. Ce
-      // n'est pas un problème de configuration Renovate à affiner — c'est la mécanique
-      // même des Apps GitHub. La seule voie sûre reste de ne PAS suivre cette
-      // dépendance depuis `base-images`.
+      // ⚠️ UNE VOIE D'ACCÈS SCOPÉ EXISTE PEUT-ÊTRE (`autodiscoverFilter`), ET ELLE
+      // N'A PAS ÉTÉ TESTÉE — trouvé en revue de #15, corrigeant une première rédaction
+      // qui affirmait à tort son absence. `autodiscoverFilter` peut exclure un dépôt
+      // de la liste que Renovate ITÈRE comme cible à gérer, SANS toucher à la
+      // visibilité du jeton d'installation pour les lookups cross-repo faits pendant
+      // le traitement d'un AUTRE dépôt — ce qui, en théorie, laisserait résoudre le
+      // digest sans refaire gérer `infra-datacenter-docs` en entier.
+      // ⚠️ DÉLIBÉRÉMENT NON INSTRUITE, PAS ÉCARTÉE PAR PREUVE : la vérifier exige de
+      // REFAIRE le geste qui vient de coûter l'incident (ajouter l'App à
+      // l'installation) — donc de reproduire le risque pour le tester, avant même de
+      // savoir si `autodiscoverFilter` le referme réellement. Le coût d'une seconde
+      // erreur au même endroit est plus grand que le bénéfice d'un digest résolu sur
+      // une référence qui ne PEUT recevoir qu'un pin (cf. paragraphe suivant). Ne pas
+      // relire ce commentaire comme « aucune voie n'existe » : il dit « non vérifiée,
+      // et le coût de vérifier dépasse le bénéfice tant que ce `@main` ne bloque
+      // rien de plus grave qu'une proposition de pin ».
       //
       // ⚠️ CE N'EST PAS UNE PERTE RÉELLE : ce `@main` ne PEUT rien recevoir d'autre
       // qu'une proposition d'épinglage SHA (aucune release, aucune version à comparer)
