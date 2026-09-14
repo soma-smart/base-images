@@ -340,6 +340,57 @@ module.exports = {
     },
     {
       description:
+        "Workflow réutilisable infra-datacenter-docs (référencé @main par TOUS les " +
+        "consommateurs) : NON SUIVI À DESSEIN, incident du 2026-09-14",
+      // ⚠️ CE DEP N'EST PAS EXCLU PAR PARESSE — la voie « donner accès à l'App » a été
+      // TENTÉE, en production, et a eu un rayon de souffle inacceptable.
+      //
+      // Chaque consommateur référence
+      //   uses: soma-smart/infra-datacenter-docs/.github/workflows/<X>.yml@main
+      // — pinné sur une BRANCHE, jamais un SHA. Le manager `github-actions` tente donc
+      // de résoudre le digest courant (datasource `github-digest`) pour proposer
+      // l'épinglage — la même politique que la famille 2 de ce fichier — et échoue à
+      // CHAQUE fois, sur les 8 consommateurs, sur toutes leurs branches : l'App
+      // `soma-base-bumper` (`repository_selection: "selected"`) n'a jamais eu accès à
+      // `infra-datacenter-docs`, un dépôt PRIVÉ. Message GitHub, retrouvé dans la trace
+      // GraphQL complète (pas le résumé) : « Could not resolve to a Repository with the
+      // name 'soma-smart/infra-datacenter-docs'. » — la réponse standard à un jeton qui
+      // ne VOIT PAS le dépôt, pas un 404 générique.
+      //
+      // ⚠️ AJOUTER `infra-datacenter-docs` À L'INSTALLATION DE L'APP A ÉTÉ ESSAYÉ ET
+      // DÉFAIT LE MÊME JOUR. Avec `autodiscover: true` (racine de ce fichier), donner
+      // à l'App la visibilité du dépôt ne lui donne pas qu'un accès en LECTURE au
+      // digest : Renovate s'est mis à traiter `infra-datacenter-docs` comme un
+      // consommateur COMPLET — 25+ dépendances scannées avec la politique de
+      // `base-images` (pas la sienne), DEUX PR réellement ouvertes en quelques minutes
+      // (#1500, #1505), une Dependency Dashboard parasite créée (#1510) en doublon de
+      // la légitime (#1291, portée par `soma-renovate-infra`). Pire : la règle CVE de
+      // ce fichier (`minimumReleaseAge: null` + automerge mineur/patch) se serait
+      // appliquée au run planifié SUIVANT, fusionnant potentiellement dans `main`
+      // d'`infra-datacenter-docs` via les gates de CE dépôt, sous l'identité et la
+      // politique d'un AUTRE. Les 3 artefacts ont été nettoyés le jour même,
+      // l'installation immédiatement retirée.
+      //
+      // ⚠️ IL N'Y A DONC PAS DE VOIE « ACCÈS SCOPÉ AU SEUL DIGEST » DISPONIBLE ICI :
+      // `repository_selection: "selected"` d'une App GitHub est un accès au DÉPÔT,
+      // combiné à `autodiscover: true` ça devient un accès à SA GESTION COMPLÈTE. Ce
+      // n'est pas un problème de configuration Renovate à affiner — c'est la mécanique
+      // même des Apps GitHub. La seule voie sûre reste de ne PAS suivre cette
+      // dépendance depuis `base-images`.
+      //
+      // ⚠️ CE N'EST PAS UNE PERTE RÉELLE : ce `@main` ne PEUT rien recevoir d'autre
+      // qu'une proposition d'épinglage SHA (aucune release, aucune version à comparer)
+      // — la seule chose que Renovate pourrait jamais y faire est précisément ce qui
+      // échoue. Si l'épinglage SHA de ce workflow partagé devient un jour nécessaire,
+      // il doit être piloté par la boucle LÉGITIME d'`infra-datacenter-docs`
+      // (`soma-renovate-infra`, dashboard #1291), qui a déjà l'accès et la politique
+      // propres à ce dépôt — jamais par un ajout d'installation côté `base-images`.
+      matchManagers: ["github-actions"],
+      matchPackageNames: ["soma-smart/infra-datacenter-docs"],
+      enabled: false,
+    },
+    {
+      description:
         "github-actions (SHA-pinnees) : automerge minor/patch/digest, gate = CI du repo",
       matchManagers: ["github-actions"],
       matchUpdateTypes: ["minor", "patch", "digest", "pinDigest"],
