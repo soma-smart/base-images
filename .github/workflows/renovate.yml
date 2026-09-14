@@ -29,9 +29,43 @@ jobs:
           # pas de 'repositories' => token sur TOUTES les installations de l'App = les consommateurs
       - name: Checkout (config global renovate-config.js)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # ⚠️ RÉPERTOIRE PARTAGÉ, ET C'EST TOUT LE SUJET. Le runner est en mode dind : le
+      # `docker run` construit par l'action est exécuté par le démon dind, donc un
+      # `-v /tmp:/tmp` monte le /tmp DU DÉMON, pas celui de cette étape. Mesuré le
+      # 2026-09-14 : la variable et le volume arrivaient bien au conteneur, et le
+      # fichier restait pourtant introuvable ici.
+      # Ce qui traverse, en revanche, est PROUVÉ par l'action elle-même : elle monte
+      # `/home/runner/_work/.../renovate-config.js` et Renovate la charge. On écrit
+      # donc le journal sous `runner.temp`, qui vit sous le même `_work`.
+      #
+      # ⚠️ 0777 : le conteneur Renovate tourne en UID 12021, ce répertoire appartient
+      # au runner. Sans ça l'écriture échoue et le journal n'existe jamais — le gate
+      # deviendrait rouge en permanence, donc se ferait neutraliser.
+      #
+      # ⚠️ CHEMIN EN MINUSCULES, ASSERTÉ. `getEnv` de Renovate applique
+      # `.toLowerCase()` à la VALEUR, pas seulement à la clé : un chemin portant une
+      # majuscule ferait écrire le journal ailleurs, sans un mot, et le gate lirait un
+      # fichier absent. On refuse de démarrer plutôt que de le découvrir en rouge.
+      - name: Préparer le journal partagé
+        env:
+          JOURNAL_DIR: ${{ runner.temp }}/renovate-journal
+        run: |
+          if [ "$JOURNAL_DIR" != "$(printf '%s' "$JOURNAL_DIR" | tr '[:upper:]' '[:lower:]')" ]; then
+            echo "::error::le chemin du journal contient une majuscule : $JOURNAL_DIR" >&2
+            echo "        Renovate met la valeur de RENOVATE_LOG_FILE en minuscules," >&2
+            echo "        le journal atterrirait ailleurs et le gate lirait du vide." >&2
+            exit 1
+          fi
+          mkdir -p "$JOURNAL_DIR"
+          chmod 0777 "$JOURNAL_DIR"
+
       - name: Self-hosted Renovate
         uses: renovatebot/github-action@b50d2ba2bd928235abdcc14d06dfafc217f1c565 # v46.1.18
         with:
+          # ⚠️ Les montages sont séparés par `;` (et non par une virgule ni un saut de
+          # ligne) — `input.ts` fait un `.split(";")`. Le défaut `/tmp:/tmp` est
+          # conservé, il sert à Renovate lui-même.
+          docker-volumes: /tmp:/tmp;${{ runner.temp }}/renovate-journal:${{ runner.temp }}/renovate-journal
           configurationFile: renovate-config.js
           token: ${{ steps.app-token.outputs.token }}
           # ⚠️ EXPLICITE, ET PAS LE DÉFAUT DE L'ACTION — sinon la version de Renovate
@@ -60,16 +94,16 @@ jobs:
           # lui, depuis toujours — ce qui rend la forme non préfixée plausible par
           # mimétisme. C'est exactement le piège « cohérent avec la ligne d'à côté ».
           #
-          # ⚠️ CHEMIN ABSOLU SOUS /tmp, seul volume monté (`docker-volumes` vaut
-          # `/tmp:/tmp` par défaut). Un chemin relatif se résoudrait contre le WORKDIR
-          # du conteneur (`/usr/src/app`), que l'espace de travail ne voit pas et qui
-          # part avec le `--rm` : le fichier n'existerait jamais côté runner.
+          # ⚠️ CHEMIN ABSOLU, DANS LE RÉPERTOIRE PARTAGÉ PRÉPARÉ CI-DESSUS. Un chemin
+          # relatif se résoudrait contre le WORKDIR du conteneur (`/usr/src/app`), qui
+          # part avec le `--rm`. Et `/tmp` NE CONVIENT PAS malgré son montage par
+          # défaut : en dind, c'est le /tmp du démon, invisible d'ici (mesuré).
           #
           # ⚠️ NOM UNIQUE PAR RUN ET PAR TENTATIVE. Le runner est self-hosted, donc
           # /tmp PERSISTE entre les runs : un nom fixe ferait lire le journal du run
           # PRÉCÉDENT le jour où celui-ci n'écrit rien — vert, sur des faits périmés.
           # Le gate surveillerait sa propre mémoire.
-          RENOVATE_LOG_FILE: /tmp/renovate-log-${{ github.run_id }}-${{ github.run_attempt }}.ndjson
+          RENOVATE_LOG_FILE: ${{ runner.temp }}/renovate-journal/run-${{ github.run_id }}-${{ github.run_attempt }}.ndjson
           RENOVATE_LOG_FILE_LEVEL: info
 
       # ⚠️ UN ÉCHEC DE LOOKUP NE DOIT PLUS ÊTRE SILENCIEUX. Quand une datasource ne
@@ -91,4 +125,4 @@ jobs:
       # un coup d'œil, un gel silencieux a coûté des semaines.
       - name: Toutes les datasources ont résolu (gate)
         if: always()
-        run: python3 scripts/verifier-lookups.py "/tmp/renovate-log-${{ github.run_id }}-${{ github.run_attempt }}.ndjson"
+        run: python3 scripts/verifier-lookups.py "${{ runner.temp }}/renovate-journal/run-${{ github.run_id }}-${{ github.run_attempt }}.ndjson"
