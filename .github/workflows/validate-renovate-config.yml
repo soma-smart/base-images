@@ -33,6 +33,11 @@ on:
       - "renovate-config.js"
       - ".github/workflows/renovate.yml"
       - ".github/workflows/validate-renovate-config.yml"
+      # ⚠️ `scripts/**` est ICI parce que sans lui, une PR qui ne toucherait QUE le
+      # gate de résolution ne jouerait pas ses propres contre-tests — le check ne se
+      # déclencherait même pas, et son absence se lirait comme un vert. Un gate dont
+      # les tests ne tournent pas quand il change est un gate décoratif.
+      - "scripts/**"
   workflow_dispatch: {}
 permissions:
   contents: read
