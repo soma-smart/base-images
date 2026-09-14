@@ -216,9 +216,16 @@ module.exports = {
     },
     {
       description:
-        "Builder slim public : stage jete (CVE non shippees), volontairement non suivi",
+        "Builders publics jetes (CVE non shippees), volontairement non suivis",
       matchManagers: ["dockerfile"],
-      matchPackageNames: ["python"],
+      // ⚠️ `golang` y a ete ajoute avec le stage `gobuilder` de multica-runtime, et pas
+      // par symetrie : sans cette entree, le manager `dockerfile` voit `golang:1.26`
+      // (le defaut de BASE_REGISTRY est vide, le nom est donc nu) et ouvre des PR de
+      // bump. Ce serait du bruit — mais surtout, un lecteur les « reglerait » un jour en
+      // EPINGLANT le tag, ce qui recreerait exactement le gel que ce stage existe pour
+      // fuir : c'est la reliaison avec une stdlib fraiche, a chaque build, qui permet de
+      // corriger une CVE stdlib de `gh` par un simple rebuild.
+      matchPackageNames: ["python", "golang"],
       enabled: false,
     },
     {
