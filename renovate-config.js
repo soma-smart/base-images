@@ -25,6 +25,38 @@ module.exports = {
   // (sinon il serait mergé avec la précédence la plus haute et pourrait désactiver
   //  silencieusement la boucle — cf. review PR #1).
   requireConfig: "ignored",
+  // ⚠️ CE N'EST PAS UN CONFORT, C'EST LA RÉPARATION D'UN GEL — trouvé en revue de
+  // #14 (2026-09-14), même classe que l'incident déjà résolu dans
+  // `infra-datacenter-docs/renovate.json` (#1368, PROJECT MEMORY
+  // project_renovate_internalchecks_gel_sans_timestamp).
+  //
+  // Depuis Renovate 42, le défaut est `timestamp-required` : une release dont la
+  // datasource n'expose AUCUN `releaseTimestamp` est réputée n'avoir jamais atteint
+  // l'âge minimal — donc, combinée à `internalChecksFilter: "strict"` (posé plus bas
+  // pour la famille 4), sa branche n'est JAMAIS créée. Ce n'est pas « en attente »,
+  // c'est DÉFINITIF, et le Dependency Dashboard l'affiche en « Pending Status
+  // Checks », indiscernable d'une vraie attente de 3 jours.
+  //
+  // La datasource `docker` sur un registre OCI générique (le `/v2/.../tags/list`
+  // d'un proxy Harbor) ne rend AUCUN `releaseTimestamp` — contrairement à
+  // `github-releases`. Le motif Trivy de ce fichier bascule précisément sur
+  // `docker` en #14 : sans cette ligne, il aurait échangé un échec BRUYANT (gate
+  // rouge sur lookup en échec) contre un gel SILENCIEUX (lookup réussi, release
+  // filtrée en aval, gate vert, dep figé pour toujours) — l'inverse exact de ce que
+  // #12/#13 existent pour garantir.
+  //
+  // ⚠️ Ça n'affaiblit AUCUNE protection réelle : là où le timestamp existe
+  // (`github-releases`, `deb`), le seuil de 3 jours continue de s'appliquer. Là où
+  // il n'existe pas, il ne protégeait rien — il bloquait.
+  // ⚠️ L'observable existe et il est nouveau : sous `timestamp-optional`, Renovate
+  // émet un `logger.once.warn` « Some release(s) did not have a releaseTimestamp …
+  // proceeding », qui remonte dans « Repository Problems » du Dashboard. Il dit
+  // QUE des releases contournent le gate d'âge, jamais lesquelles.
+  // ⚠️ L'orthographe est BRITANNIQUE (`Behaviour`), et sa VALEUR n'est validée par
+  // PERSONNE en amont — `renovate-config-validator` accepte n'importe quelle chaîne
+  // sans un mot. Le gate de `validate-renovate-config.yml` la contrôle par un enum
+  // explicite, pour que ce correctif ne devienne pas lui-même une épingle muette.
+  minimumReleaseAgeBehaviour: "timestamp-optional",
   // Dashboard actif : surface les "Dependency Lookup Warnings" (ex. échec d'auth
   // Harbor sur hostRules) qui, sinon, rendent la boucle muette sans erreur de job.
   // ⚠️ CETTE LIGNE ALIMENTE LE GATE `verifier-lookups.py`, et ce couplage n'est

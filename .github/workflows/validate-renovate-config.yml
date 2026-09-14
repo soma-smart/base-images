@@ -57,8 +57,23 @@ jobs:
           VERSION_RENOVATE: "43"
           # ⚠️ La config lit `process.env.HARBOR_*` pour ses `hostRules`. Sans ces
           # variables, elles vaudraient `undefined` et la validation échouerait sur
-          # un faux motif — la config serait pourtant correcte en production, où le
-          # workflow les fournit. Valeurs factices : on valide la FORME, pas l'accès.
+          # un motif de FORME plutôt que de fond. Valeurs factices : on valide la
+          # forme, pas l'accès réel.
+          #
+          # ⚠️ CE COMMENTAIRE AFFIRMAIT AUPARAVANT « la config serait correcte en
+          # production, où le workflow les fournit » — C'ÉTAIT FAUX, trouvé en revue
+          # de #14 (2026-09-14) et CONFIRMÉ dans le log d'un run réel de production :
+          # les deux mêmes erreurs (`hostRules[0].username/password should be a
+          # string`) y figurent déjà. `renovate.yml` passe `HARBOR_USERNAME` et
+          # `HARBOR_PASSWORD` sous leur nom NU, or l'action ne transmet PAS
+          # l'environnement du runner tel quel : elle le FILTRE sur
+          #   ^(?:RENOVATE_\w+|LOG_LEVEL|GITHUB_COM_TOKEN|NODE_OPTIONS|NO_COLOR|…)$
+          # avant de construire son `docker run` — c'est la MÊME cause que celle qui a
+          # forcé `RENOVATE_LOG_FILE` (cf. renovate.yml). Le `hostRule` Harbor ne
+          # porte donc AUCUN credential en production depuis toujours ; la résolution
+          # du digest du socle DHI — la dépendance n°1 de cette config — ne tient que
+          # parce que le projet `dockerhub-proxy` répond en anonyme. Ticket séparé,
+          # hors périmètre de ce gate qui valide la FORME, pas le transport.
           HARBOR_USERNAME: validation-placeholder
           HARBOR_PASSWORD: validation-placeholder
         # ⚠️ Par STDIN, pas par bind-mount : la résolution d'un montage de l'espace
@@ -111,5 +126,38 @@ jobs:
                 process.exit(1);
               }
               console.log(\`OK - \${n} motif(s), custom.regex actif=\${actif}\`);
+            "' \
+            < renovate-config.js
+
+      - name: minimumReleaseAgeBehaviour doit être une valeur connue
+        # ⚠️ `renovate-config-validator` NE VALIDE PAS la VALEUR de cette option — il
+        # accepte n'importe quelle chaîne sans un mot (vérifié dans
+        # `config/options/index.js` de l'image 43 : `allowedValues` existe dans le
+        # schéma, mais le validateur ne le fait pas respecter). Une faute de frappe
+        # ("timestamp-optionnal", l'orthographe française du mot) passerait ce gate
+        # et retomberait sur le défaut `timestamp-required` EN SILENCE — c'est-à-dire
+        # exactement le gel que cette ligne existe pour réparer (cf. son commentaire
+        # dans renovate-config.js). On vérifie donc nous-mêmes, sur l'OBJET CHARGÉ.
+        env:
+          VERSION_RENOVATE: "43"
+          HARBOR_USERNAME: validation-placeholder
+          HARBOR_PASSWORD: validation-placeholder
+        run: |
+          docker run --rm -i \
+            -e HARBOR_USERNAME -e HARBOR_PASSWORD \
+            "registry-dev.soma-smart.cloud/dockerhub-proxy/renovate/renovate:${VERSION_RENOVATE}" \
+            sh -c 'cat > /tmp/renovate-config.js && node -e "
+              const c = require(\"/tmp/renovate-config.js\");
+              const permises = [\"timestamp-required\", \"timestamp-optional\"];
+              const v = c.minimumReleaseAgeBehaviour;
+              if (v === undefined) {
+                console.error(\"::error::minimumReleaseAgeBehaviour absent — retombe sur timestamp-required, gel silencieux possible (cf. #1368).\");
+                process.exit(1);
+              }
+              if (!permises.includes(v)) {
+                console.error(\`::error::minimumReleaseAgeBehaviour=\${JSON.stringify(v)} n est pas une valeur connue de Renovate 43 (attendu: \${permises.join(\" | \")}).\`);
+                process.exit(1);
+              }
+              console.log(\`OK - minimumReleaseAgeBehaviour=\${v}\`);
             "' \
             < renovate-config.js
