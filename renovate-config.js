@@ -25,6 +25,38 @@ module.exports = {
   // (sinon il serait mergé avec la précédence la plus haute et pourrait désactiver
   //  silencieusement la boucle — cf. review PR #1).
   requireConfig: "ignored",
+  // ⚠️ CE N'EST PAS UN CONFORT, C'EST LA RÉPARATION D'UN GEL — trouvé en revue de
+  // #14 (2026-09-14), même classe que l'incident déjà résolu dans
+  // `infra-datacenter-docs/renovate.json` (#1368, PROJECT MEMORY
+  // project_renovate_internalchecks_gel_sans_timestamp).
+  //
+  // Depuis Renovate 42, le défaut est `timestamp-required` : une release dont la
+  // datasource n'expose AUCUN `releaseTimestamp` est réputée n'avoir jamais atteint
+  // l'âge minimal — donc, combinée à `internalChecksFilter: "strict"` (posé plus bas
+  // pour la famille 4), sa branche n'est JAMAIS créée. Ce n'est pas « en attente »,
+  // c'est DÉFINITIF, et le Dependency Dashboard l'affiche en « Pending Status
+  // Checks », indiscernable d'une vraie attente de 3 jours.
+  //
+  // La datasource `docker` sur un registre OCI générique (le `/v2/.../tags/list`
+  // d'un proxy Harbor) ne rend AUCUN `releaseTimestamp` — contrairement à
+  // `github-releases`. Le motif Trivy de ce fichier bascule précisément sur
+  // `docker` en #14 : sans cette ligne, il aurait échangé un échec BRUYANT (gate
+  // rouge sur lookup en échec) contre un gel SILENCIEUX (lookup réussi, release
+  // filtrée en aval, gate vert, dep figé pour toujours) — l'inverse exact de ce que
+  // #12/#13 existent pour garantir.
+  //
+  // ⚠️ Ça n'affaiblit AUCUNE protection réelle : là où le timestamp existe
+  // (`github-releases`, `deb`), le seuil de 3 jours continue de s'appliquer. Là où
+  // il n'existe pas, il ne protégeait rien — il bloquait.
+  // ⚠️ L'observable existe et il est nouveau : sous `timestamp-optional`, Renovate
+  // émet un `logger.once.warn` « Some release(s) did not have a releaseTimestamp …
+  // proceeding », qui remonte dans « Repository Problems » du Dashboard. Il dit
+  // QUE des releases contournent le gate d'âge, jamais lesquelles.
+  // ⚠️ L'orthographe est BRITANNIQUE (`Behaviour`), et sa VALEUR n'est validée par
+  // PERSONNE en amont — `renovate-config-validator` accepte n'importe quelle chaîne
+  // sans un mot. Le gate de `validate-renovate-config.yml` la contrôle par un enum
+  // explicite, pour que ce correctif ne devienne pas lui-même une épingle muette.
+  minimumReleaseAgeBehaviour: "timestamp-optional",
   // Dashboard actif : surface les "Dependency Lookup Warnings" (ex. échec d'auth
   // Harbor sur hostRules) qui, sinon, rendent la boucle muette sans erreur de job.
   // ⚠️ CETTE LIGNE ALIMENTE LE GATE `verifier-lookups.py`, et ce couplage n'est
@@ -160,15 +192,46 @@ module.exports = {
       // manager `github-actions` (qui ne lit que les `uses:`). Sans ce motif, le
       // scanner gèle et cesse de détecter les CVE récentes — un gate qui rend
       // vert sans plus rien prouver.
-      description: "TRIVY_VERSION (workflow de build) — scanner d'images",
+      //
+      // ⚠️ CE MOTIF SUIT L'IMAGE, PLUS LA RELEASE GITHUB, ET C'EST UNE CORRECTION DE
+      // PANNE. Il visait `github-releases` sur `aquasecurity/trivy` et échouait à
+      // CHAQUE run depuis des semaines : l'organisation amont a activé une IP allow
+      // list GitHub, qui rejette nos requêtes AUTHENTIFIÉES (message de GitHub :
+      // « the `aquasecurity` organization has an IP allow list enabled »). Le scanner
+      // de CVE de tout le parc est resté figé sans qu'aucun signal ne parte.
+      // ⚠️ Ni un PAT ni `GITHUB_COM_TOKEN` n'y changeraient rien : le filtre porte sur
+      // l'IP, pas sur le jeton. Mesuré — la même requête ANONYME, depuis la même IP,
+      // rend 200. Ne pas « réparer » ce motif en lui ajoutant un jeton.
+      //
+      // ⚠️ On suit désormais L'ARTEFACT RÉELLEMENT CONSOMMÉ : le workflow de build tire
+      // `dockerhub-proxy/aquasec/trivy:${TRIVY_VERSION}`. Surveiller autre chose que ce
+      // qu'on exécute rouvrirait un écart entre l'index et la réalité — et ça supprime
+      // toute dépendance à la politique IP d'un tiers, qui peut rechanger sans préavis.
+      //
+      // ⚠️ Deux mesures ont décidé, à ne pas re-supposer :
+      //   - le proxy Harbor expose la liste COMPLÈTE des tags amont (0.1.6 → 0.74.0),
+      //     pas seulement ceux déjà en cache — c'était la crainte principale, et elle
+      //     était infondée ;
+      //   - le versioning `docker` rend `isCompatible=false` pour `0.74.0-amd64`,
+      //     `-arm64` et `-s390x` face à `0.73.0` : aucune variante d'architecture ne
+      //     peut être proposée. Ne pas ajouter d'`allowedVersions` « au cas où ».
+      //
+      // ⚠️ Le listing du proxy répond en ANONYME (vérifié) — ce qui est heureux, car
+      // `HARBOR_USERNAME`/`HARBOR_PASSWORD` n'atteignent pas le conteneur (filtrés par
+      // l'`env-regex` de l'action). Ce défaut est traité à part ; ce motif n'en dépend
+      // pas, mais ne pas conclure de son bon fonctionnement que les credentials passent.
+      //
+      // ⚠️ Plus d'`extractVersion` : les tags de l'image sont nus (`0.74.0`), sans le
+      // `v` des tags Git. En conserver un ferait que rien ne matcherait plus — et un
+      // motif qui ne matche rien ne lève aucune erreur.
+      description: "TRIVY_VERSION (workflow de build) — scanner d'images, suivi via le proxy Harbor",
       customType: "regex",
       managerFilePatterns: ["/^\\.github/workflows/.*\\.ya?ml$/"],
       // ⚠️ Ancré, même raison que les motifs Dockerfile de ce bloc : une ligne YAML
       // commentée (`# TRIVY_VERSION: 0.60.0`) matcherait sinon.
       matchStrings: ["(?m)^\\s*TRIVY_VERSION: *[\"']?(?<currentValue>[^\"'\\s]+)[\"']?"],
-      depNameTemplate: "aquasecurity/trivy",
-      datasourceTemplate: "github-releases",
-      extractVersionTemplate: "^v(?<version>.*)$",
+      depNameTemplate: "registry-dev.soma-smart.cloud/dockerhub-proxy/aquasec/trivy",
+      datasourceTemplate: "docker",
     },
     {
       // ⚠️ CELUI-CI N'A PAS DE HASH JUMEAU, contrairement à `MULTICA_VERSION` juste
