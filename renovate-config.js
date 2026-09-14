@@ -27,6 +27,12 @@ module.exports = {
   requireConfig: "ignored",
   // Dashboard actif : surface les "Dependency Lookup Warnings" (ex. échec d'auth
   // Harbor sur hostRules) qui, sinon, rendent la boucle muette sans erreur de job.
+  // ⚠️ CETTE LIGNE ALIMENTE LE GATE `verifier-lookups.py`, et ce couplage n'est
+  // devinable depuis aucun des deux fichiers. Le champ `warnings` — le seul signal
+  // qu'une résolution a échoué — n'est émis QUE par le chemin qui construit la
+  // Dependency Dashboard. La retirer, ou ajouter `dependencyLookupWarnings` à
+  // `suppressNotifications`, rend le gate AVEUGLE sans le rendre rouge : il
+  // continuerait de passer au vert en n'ayant plus rien à examiner.
   dependencyDashboard: true,
   // ⚠️ DÉSACTIVE l'écriture du statut de commit `renovate/stability-days`, et ce
   // n'est pas cosmétique : sans ça, la maturation `minimumReleaseAge` BLOQUE les

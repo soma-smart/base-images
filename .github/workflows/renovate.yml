@@ -50,8 +50,27 @@ jobs:
           LOG_LEVEL: ${{ inputs.logLevel || 'info' }}
           # Journal STRUCTURÉ, en plus de la sortie console : l'étape suivante doit
           # statuer sur des faits, pas sur du texte coloré par des séquences ANSI.
-          LOG_FILE: renovate-log.ndjson
-          LOG_FILE_LEVEL: info
+          #
+          # ⚠️ PRÉFIXE `RENOVATE_` OBLIGATOIRE, ET CE N'EST PAS DU STYLE. L'action ne
+          # transmet pas l'environnement du runner : elle le FILTRE avant de construire
+          # son `docker run`, sur
+          #   ^(?:RENOVATE_\w+|LOG_LEVEL|GITHUB_COM_TOKEN|NODE_OPTIONS|NO_COLOR|…)$
+          # `LOG_FILE` ne passe pas ce filtre. Renovate honore les deux noms, mais seul
+          # le préfixé atteint le conteneur. Le `LOG_LEVEL:` nu juste au-dessus marche,
+          # lui, depuis toujours — ce qui rend la forme non préfixée plausible par
+          # mimétisme. C'est exactement le piège « cohérent avec la ligne d'à côté ».
+          #
+          # ⚠️ CHEMIN ABSOLU SOUS /tmp, seul volume monté (`docker-volumes` vaut
+          # `/tmp:/tmp` par défaut). Un chemin relatif se résoudrait contre le WORKDIR
+          # du conteneur (`/usr/src/app`), que l'espace de travail ne voit pas et qui
+          # part avec le `--rm` : le fichier n'existerait jamais côté runner.
+          #
+          # ⚠️ NOM UNIQUE PAR RUN ET PAR TENTATIVE. Le runner est self-hosted, donc
+          # /tmp PERSISTE entre les runs : un nom fixe ferait lire le journal du run
+          # PRÉCÉDENT le jour où celui-ci n'écrit rien — vert, sur des faits périmés.
+          # Le gate surveillerait sa propre mémoire.
+          RENOVATE_LOG_FILE: /tmp/renovate-log-${{ github.run_id }}-${{ github.run_attempt }}.ndjson
+          RENOVATE_LOG_FILE_LEVEL: info
 
       # ⚠️ UN ÉCHEC DE LOOKUP NE DOIT PLUS ÊTRE SILENCIEUX. Quand une datasource ne
       # résout pas, Renovate n'ouvre aucune PR et écrit un avertissement dans le CORPS
@@ -62,9 +81,14 @@ jobs:
       # ⚠️ `if: always()` : sans lui, un échec de Renovate lui-même sauterait le gate,
       # et l'absence de gate se lirait comme une absence de problème.
       #
+      # ⚠️ Le nom de l'étape dit ce qui est PROUVÉ, pas la conclusion qu'on espère : le
+      # gate atteste que toute résolution tentée a abouti, jamais que « tout est
+      # suivi ». Ses angles morts sont listés en tête du script — les lire avant de
+      # conclure quoi que ce soit d'un vert.
+      #
       # ⚠️ DÉLIBÉRÉMENT BRUYANT : une indisponibilité amont passagère rendra le job
       # rouge le temps d'un run. Compromis assumé — un rouge qui se répare seul coûte
       # un coup d'œil, un gel silencieux a coûté des semaines.
-      - name: Aucun échec de lookup (gate)
+      - name: Toutes les datasources ont résolu (gate)
         if: always()
-        run: python3 scripts/verifier-lookups.py renovate-log.ndjson
+        run: python3 scripts/verifier-lookups.py "/tmp/renovate-log-${{ github.run_id }}-${{ github.run_attempt }}.ndjson"

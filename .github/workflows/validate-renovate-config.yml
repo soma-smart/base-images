@@ -67,6 +67,14 @@ jobs:
             sh -c 'cat > /tmp/renovate-config.js && renovate-config-validator /tmp/renovate-config.js' \
             < renovate-config.js
 
+      # ⚠️ LE GATE ANTI-GEL EST LUI-MÊME TESTÉ, et ce n'est pas du zèle : un gate
+      # anti-échec-silencieux non testé est un échec silencieux de plus. Les cas
+      # couverts sont les chemins par lesquels il rendrait VERT sans rien prouver —
+      # journal tronqué, journal au mauvais format, aucun dépôt traité. Deux d'entre
+      # eux étaient ouverts dans sa première rédaction.
+      - name: Contre-tests du gate de résolution
+        run: python3 scripts/test_verifier_lookups.py
+
       - name: Manager et motifs doivent rester appariés
         # Ce que le validateur NE dit PAS : `custom.regex` activé sans
         # `customManagers`, ou l'inverse, est parfaitement VALIDE et totalement
