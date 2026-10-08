@@ -7,6 +7,21 @@ name: renovate
 on:
   schedule:
     - cron: "0 6,12,18 * * *"   # 3x/jour UTC (apres le mirror-dhi de 02:00)
+    # Passe de MERGE du bump de digest nocturne. L'automerge est cote Renovate
+    # (org Free, platformAutomerge: false) : il ne merge qu'a un run ULTERIEUR,
+    # une fois le ci-docker-build de la PR vert. Sans cette passe, la PR ouverte a
+    # ~02:40 attendait 12:00 pour etre mergee.
+    - cron: "15 3 * * *"
+  # Enchaine sur le mirror-dhi : la PR de digest s'ouvre des que la nouvelle base
+  # est poussee (~02:35), et non plus a 06:00.
+  # ⚠️ POURQUOI C'EST URGENT ET PAS UN CONFORT : la retention Harbor du projet
+  # `base` (latestPushedK=3 par depot) + le GC delete_untagged font disparaitre
+  # l'ancien digest en quelques heures (constate le 2026-10-08 : < 8 h). Entre le
+  # push du mirror et le merge du bump, tout build d'app qui epingle l'ancien
+  # digest echoue (`not found`) — CD pilotage-app casse les 2026-10-07 et 08.
+  workflow_run:
+    workflows: ["mirror-dhi"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       logLevel:
@@ -17,6 +32,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   renovate:
+    # Sur workflow_run : seulement si le mirror a reussi (sinon pas de nouvelle base).
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: onprem-dev-base-images
     steps:
       - name: Generate GitHub App token
