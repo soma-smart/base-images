@@ -13,6 +13,11 @@
 ARG PY_VERSION=3.14
 FROM python:${PY_VERSION}-slim
 
+# ⚠️ Ce label n'est PAS décoratif : il LIE le package ghcr au dépôt. Sans lui, le package créé
+# par la copie vers ghcr n'est rattaché à aucun dépôt et les pushes suivants avec `GITHUB_TOKEN`
+# sont refusés — la copie échouerait à la 2ᵉ exécution, pas à la première.
+LABEL org.opencontainers.image.source="https://github.com/soma-smart/base-images"
+
 # ⚠️ `dist-upgrade` AVANT tout le reste, et ce n'est pas du confort. Sans lui, ce socle
 # ne peut appliquer un correctif de sécurité Debian qu'en ATTENDANT que Docker Hub
 # reconstruise `python:<ver>-slim` — une cadence sur laquelle nous n'avons aucune prise.

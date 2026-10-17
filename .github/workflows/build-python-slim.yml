@@ -23,6 +23,11 @@ concurrency:
 jobs:
   build:
     runs-on: onprem-dev-base-images
+    # `packages: write` : la copie vers ghcr (step ci-dessous) s'authentifie avec le GITHUB_TOKEN du job.
+    # Jamais de PAT : un PAT classique `read:packages`/`write:packages` couvre TOUS les packages de l'org.
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -151,6 +156,38 @@ jobs:
         env:
           VERSION: ${{ matrix.version }}
         run: docker push "registry-dev.soma-smart.cloud/base/python-slim:${VERSION}"
+
+      - name: Installer crane
+        # Version ÉPINGLÉE + SHA-256 vérifié (pas de script `main` flottant comme pour trivy) :
+        # cet outil écrit sur ghcr avec un jeton à droits d'écriture.
+        # ⚠️ Dette : aucun manager Renovate ne voit cette version — la bumper à la main.
+        if: github.event_name != 'pull_request'
+        env:
+          CRANE_VERSION: v0.22.1
+          CRANE_SHA256: 0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0
+        run: |
+          set -eu
+          mkdir -p "$HOME/.local/bin"
+          curl -sfL -o /tmp/crane.tgz "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
+          echo "${CRANE_SHA256}  /tmp/crane.tgz" | sha256sum -c -
+          tar -xzf /tmp/crane.tgz -C "$HOME/.local/bin" crane
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Copier vers ghcr (même digest, sinon échec)
+        # Le pod de build des MCP (namespace arc-mcp) ne peut PAS joindre Harbor : il tire ses bases
+        # d'ici, en anonyme — le package ghcr doit donc être PUBLIC (geste manuel, cf. plan). Copie
+        # APRÈS le gate Trivy et le push Harbor, par digest ; placée AVANT « Signal de vie » : un
+        # échec fait pinger `/fail`, la copie est donc couverte par le dead-man's switch existant.
+        if: github.event_name != 'pull_request'
+        env:
+          VERSION: ${{ matrix.version }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          python3 scripts/copie_ghcr.py \
+            "registry-dev.soma-smart.cloud/base/python-slim:${VERSION}" \
+            "ghcr.io/soma-smart/base/python-slim:${VERSION}"
 
       - name: Signal de vie (dead-man's switch)
         # ⚠️ Ce job a échoué QUATRE NUITS d'affilée (2026-08-17 → 20) sans que personne

@@ -95,6 +95,9 @@ jobs:
       - name: Contre-tests du gate de résolution
         run: python3 scripts/test_verifier_lookups.py
 
+      - name: Contre-tests de la copie vers ghcr
+        run: python3 scripts/test_copie_ghcr.py
+
       - name: Manager et motifs doivent rester appariés
         # Ce que le validateur NE dit PAS : `custom.regex` activé sans
         # `customManagers`, ou l'inverse, est parfaitement VALIDE et totalement
