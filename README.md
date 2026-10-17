@@ -27,6 +27,11 @@ python:<ver>-slim  ──(build nocturne + libgomp1 + non-root 65532)──▶  
                         apps sci: FROM …/base/python-slim:<ver>@sha256:<digest>  (digest-pin Renovate)
 ```
 
+**Copie ghcr (même digest).** Après le push Harbor, `scripts/copie_ghcr.py` copie `base/python-slim:<ver>` vers `ghcr.io/soma-smart/base/python-slim:<ver>` **par digest**, puis relit la destination **sans identifiants**. Raison : le pod de build des MCP (namespace `arc-mcp`, code non relu) ne peut pas joindre Harbor ; il tire ses bases de ghcr, en anonyme.
+- Le package ghcr doit être **public** (geste manuel : Package settings → Change visibility). Tant qu'il est privé, la copie échoue exprès (relecture anonyme) et la check Healthchecks du build reçoit `/fail`.
+- Fenêtre de divergence : Harbor est poussé AVANT la copie ; si la copie échoue, ghcr reste sur l'ancien digest jusqu'à la correction (le `/fail` l'annonce).
+- Rétention différente : Harbor purge un digest sans tag en ~3 jours, ghcr le garde (nettoyage à prévoir quand le volume le justifie).
+
 - `.github/workflows/build-python-slim.yml` — `docker build python-slim/Dockerfile` (`FROM python:<ver>-slim` **non pinné** + `--pull`) → gate Trivy durci → push. Même robot `base-pusher`, même runner, même tag mouvant + digest-pin consommateur que `base/python`.
 - **Le socle applique lui-même les correctifs Debian** (`apt-get dist-upgrade` au build). ⚠️ **Ce n'est pas redondant avec `--pull`** : `--pull` ne fait que reprendre le dernier `python:<ver>-slim` publié par Docker Hub, dont la cadence de reconstruction ne nous appartient pas. Sans le `dist-upgrade`, une DSA publiée aujourd'hui n'entre dans le socle que le jour où Docker Hub reconstruit — et le gate, lui, refuse la base **immédiatement**. C'est exactement l'interblocage vécu du 2026-08-17 au 20 (DSA-6442-1, `util-linux`) : gate rouge quatre nuits, base plus republiée, digest figé, **aucun consommateur du socle capable de produire une image verte**.
 - **Le gate ne peut pas être vert par aveuglement.** Le verdict n'est plus `trivy --exit-code 1` mais un contrôle explicite : schéma du rapport, artefact scanné, **inventaire de paquets OS non vide**, distribution non EOSL, puis absence de CVE. Un scan qui n'analyse rien sort `0` — sur un socle qui retire déjà pip et `ensurepip`, c'est un mode de panne réel, pas une hypothèse.
