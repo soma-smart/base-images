@@ -2,7 +2,8 @@ name: build-python-slim
 # Base SLIM durcie (non-distroless) pour les apps scientifiques (scipy/scikit-learn)
 # que le distroless DHI ne couvre pas. Construite depuis python:<ver>-slim + libgomp1
 # + non-root uid 65532, Trivy-gatée, poussée en tag mouvant base/python-slim:<ver>
-# (rebuild nocturne pour les patchs slim ; consommateurs épinglent par digest via Renovate).
+# (rebuild nocturne pour les patchs slim ; consommateurs épinglent par digest via Renovate),
+# puis copiée à l'identique (même digest) sur ghcr.io/soma-smart/base/python-slim pour le pod de build des MCP.
 on:
   schedule:
     - cron: "0 3 * * *"   # 03:00 UTC (après le mirror DHI de 02:00)
@@ -24,7 +25,8 @@ jobs:
   build:
     runs-on: onprem-dev-base-images
     # `packages: write` : la copie vers ghcr (step ci-dessous) s'authentifie avec le GITHUB_TOKEN du job.
-    # Jamais de PAT : un PAT classique `read:packages`/`write:packages` couvre TOUS les packages de l'org.
+    # Pour ghcr, jamais de PAT : un PAT classique `write:packages` couvre tous les packages de son propriétaire.
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
@@ -47,8 +49,9 @@ jobs:
           DOCKERHUB_PAT: ${{ secrets.DOCKERHUB_PAT }}
         run: echo "$DOCKERHUB_PAT" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
       - name: Login Harbor (push base)
-        # Inutile sur une PR, qui ne publie pas — et le dire ici prouve que le chemin
-        # de PR n'a besoin d'aucun credential d'écriture sur le registre.
+        # Inutile sur une PR, qui ne publie pas : le chemin de PR n'a besoin d'aucun credential
+        # d'écriture sur Harbor. ⚠️ Le `packages: write` du job (ghcr) est, lui, accordé aussi aux PR :
+        # inutilisé sur ce chemin (steps ghcr exclus), mais présent — jeton en lecture seule sur les forks.
         if: github.event_name != 'pull_request'
         env:
           HARBOR_USERNAME: ${{ secrets.HARBOR_USERNAME }}
@@ -161,7 +164,7 @@ jobs:
         # Version ÉPINGLÉE + SHA-256 vérifié (pas de script `main` flottant comme pour trivy) :
         # cet outil écrit sur ghcr avec un jeton à droits d'écriture.
         # ⚠️ Dette : aucun manager Renovate ne voit cette version — la bumper à la main.
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           CRANE_VERSION: v0.22.1
           CRANE_SHA256: 0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0
@@ -178,7 +181,8 @@ jobs:
         # d'ici, en anonyme — le package ghcr doit donc être PUBLIC (geste manuel, cf. plan). Copie
         # APRÈS le gate Trivy et le push Harbor, par digest ; placée AVANT « Signal de vie » : un
         # échec fait pinger `/fail`, la copie est donc couverte par le dead-man's switch existant.
-        if: github.event_name != 'pull_request'
+        # `ref == main` : un `workflow_dispatch` lancé depuis une branche pousserait sinon sur un registre PUBLIC.
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           VERSION: ${{ matrix.version }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
