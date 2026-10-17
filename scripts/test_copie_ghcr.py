@@ -32,6 +32,9 @@ def faux_crane(src=A, dst=A, anon=A, rc_src=0, rc_copy=0, rc_dst=0, rc_anon=0, l
             return subprocess.CompletedProcess(argv, rc_copy, stdout="", stderr="boom" if rc_copy else "")
         assert argv[1] == "digest", argv
         if kw.get("env"):
+            fuite = sorted(k for k in kw["env"] if k in ("GITHUB_TOKEN", "GH_TOKEN", "DOCKER_AUTH_CONFIG", "REGISTRY_AUTH_FILE"))
+            assert not fuite, f"la relecture ANONYME porte des identifiants : {fuite}"
+            assert kw["env"].get("DOCKER_CONFIG") and kw["env"].get("HOME") == kw["env"]["DOCKER_CONFIG"], kw["env"]
             sortie, rc = anon, rc_anon
         elif argv[2] == SRC or ":5000/" in argv[2]:
             sortie, rc = src, rc_src
@@ -59,6 +62,8 @@ def attend_echec(nom, run_appels, fragments, src=SRC, copie_interdite=False):
 
 
 def jouer():
+    import os
+    os.environ.update(GITHUB_TOKEN="ghs_factice", GH_TOKEN="ghs_factice")  # le job les exporte : ils ne doivent PAS passer
     n = 0
     run, appels = faux_crane()
     assert copier_et_verifier(SRC, DST, run=run) == A, "nominal"

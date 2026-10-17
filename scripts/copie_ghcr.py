@@ -62,7 +62,9 @@ def copier_et_verifier(src, dst, run=subprocess.run):
         raise CopieError(f"digest différent après copie : source {digest}, destination {obtenu} ({dst})")
     with tempfile.TemporaryDirectory() as vide:
         try:
-            anonyme = _crane(run, "digest", dst, env={**os.environ, "DOCKER_CONFIG": vide})
+            # Environnement bâti DE ZÉRO, pas dérivé de `os.environ` : le job exporte GITHUB_TOKEN (et gh/docker peuvent
+            # lire d'autres variables d'auth) ; une relecture « anonyme » qui en hérite lirait un package privé.
+            anonyme = _crane(run, "digest", dst, env={"PATH": os.environ.get("PATH", ""), "HOME": vide, "DOCKER_CONFIG": vide})
         except CopieError as e:
             raise CopieError(f"{dst} illisible en anonyme : le package ghcr n'est pas public (Package settings > "
                              f"Change visibility) — les pulls anonymes du pod de build feront 401. {e}") from None
