@@ -290,6 +290,10 @@ module.exports = {
       matchPackageNames: [
         "registry-dev.soma-smart.cloud/base/python",
         "registry-dev.soma-smart.cloud/base/python-slim",
+        // Copies publiques sur ghcr (même digest) : le pod de build des MCP ne joint pas Harbor.
+        // Sans ces noms, un FROM ghcr ne reçoit NI pinDigests NI automerge de digest : il gèle sans erreur.
+        "ghcr.io/soma-smart/base/python",
+        "ghcr.io/soma-smart/base/python-slim",
       ],
       pinDigests: true,
     },
@@ -300,6 +304,10 @@ module.exports = {
       matchPackageNames: [
         "registry-dev.soma-smart.cloud/base/python",
         "registry-dev.soma-smart.cloud/base/python-slim",
+        // Copies publiques sur ghcr (même digest) : le pod de build des MCP ne joint pas Harbor.
+        // Sans ces noms, un FROM ghcr ne reçoit NI pinDigests NI automerge de digest : il gèle sans erreur.
+        "ghcr.io/soma-smart/base/python",
+        "ghcr.io/soma-smart/base/python-slim",
       ],
       matchUpdateTypes: ["digest", "pinDigest"],
       automerge: true,
