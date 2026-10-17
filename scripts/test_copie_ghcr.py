@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from copie_ghcr import CopieError, copier_et_verifier  # noqa: E402
+from copie_ghcr import DELAI_S, CopieError, copier_et_verifier  # noqa: E402
 
 SRC = "registry-dev.soma-smart.cloud/base/python-slim:3.14"
 DST = "ghcr.io/soma-smart/base/python-slim:3.14"
@@ -25,6 +25,7 @@ def faux_crane(src=A, dst=A, anon=A, rc_src=0, rc_copy=0, rc_dst=0, rc_anon=0, l
     appels = []
 
     def run(argv, **kw):
+        assert kw.get("timeout") == DELAI_S, f"appel crane SANS delai : {argv}"
         appels.append((list(argv), kw))
         if leve:
             raise leve
@@ -35,6 +36,8 @@ def faux_crane(src=A, dst=A, anon=A, rc_src=0, rc_copy=0, rc_dst=0, rc_anon=0, l
             fuite = sorted(k for k in kw["env"] if k in ("GITHUB_TOKEN", "GH_TOKEN", "DOCKER_AUTH_CONFIG", "REGISTRY_AUTH_FILE"))
             assert not fuite, f"la relecture ANONYME porte des identifiants : {fuite}"
             assert kw["env"].get("DOCKER_CONFIG") and kw["env"].get("HOME") == kw["env"]["DOCKER_CONFIG"], kw["env"]
+            assert kw["env"].get("HTTPS_PROXY") == "http://proxy.test:3128" and kw["env"].get("SSL_CERT_FILE") == "/ca.pem", \
+                "le proxy et la CA du runner doivent traverser (sinon faux « package privé » sur un runner derriere un proxy)"
             sortie, rc = anon, rc_anon
         elif argv[2] == SRC or ":5000/" in argv[2]:
             sortie, rc = src, rc_src
@@ -63,7 +66,7 @@ def attend_echec(nom, run_appels, fragments, src=SRC, copie_interdite=False):
 
 def jouer():
     import os
-    os.environ.update(GITHUB_TOKEN="ghs_factice", GH_TOKEN="ghs_factice")  # le job les exporte : ils ne doivent PAS passer
+    os.environ.update(GITHUB_TOKEN="ghs_factice", GH_TOKEN="ghs_factice", HTTPS_PROXY="http://proxy.test:3128", SSL_CERT_FILE="/ca.pem")  # le job les exporte : ils ne doivent PAS passer
     n = 0
     run, appels = faux_crane()
     assert copier_et_verifier(SRC, DST, run=run) == A, "nominal"
@@ -84,13 +87,17 @@ def jouer():
     attend_echec("source_digest_court", faux_crane(src="sha256:aaa", dst="sha256:aaa"), ["illisible"], copie_interdite=True)
     attend_echec("crane_digest_source_en_echec", faux_crane(rc_src=1), ["denied"], copie_interdite=True)
     attend_echec("crane_digest_destination_en_echec", faux_crane(rc_dst=1), ["denied"])
-    attend_echec("package_prive", faux_crane(rc_anon=1), ["public", "anonyme"])
+    attend_echec("package_prive", faux_crane(rc_anon=1), ["privé", "anonyme"])
     attend_echec("anonyme_voit_un_autre_digest", faux_crane(anon=B), [A, B])
+    attend_echec("anonyme_vide", faux_crane(anon=""), [A])
+    attend_echec("anonyme_digest_voisin", faux_crane(anon=A + "x"), [A])
+    attend_echec("source_digest_trop_long", faux_crane(src=A + "a", dst=A + "a"), ["illisible"], copie_interdite=True)
+    attend_echec("source_digest_majuscules", faux_crane(src="sha256:" + "A" * 64, dst="sha256:" + "A" * 64), ["illisible"], copie_interdite=True)
     attend_echec("source_sans_tag_avec_port", faux_crane(), ["tag"], src="host:5000/x", copie_interdite=True)
     attend_echec("source_deja_un_digest", faux_crane(), ["tag"], src=f"host/x@{A}", copie_interdite=True)
     attend_echec("crane_introuvable", faux_crane(leve=FileNotFoundError("crane")), ["crane"])
     attend_echec("delai_depasse", faux_crane(leve=subprocess.TimeoutExpired("crane", 1)), ["delai"])
-    n += 13
+    n += 17
     r = subprocess.run([sys.executable, str(Path(__file__).with_name("copie_ghcr.py")), SRC, DST],
                        capture_output=True, text=True, env={"PATH": "/nonexistent"})
     assert r.returncode != 0 and "ERREUR:" in r.stderr, (r.returncode, r.stderr)

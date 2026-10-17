@@ -25,6 +25,8 @@ import tempfile
 
 DELAI_S = 300
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+VARIABLES_RESEAU = frozenset({"SSL_CERT_FILE", "SSL_CERT_DIR", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
+                              "https_proxy", "http_proxy", "no_proxy"})
 
 
 class CopieError(RuntimeError):
@@ -64,10 +66,14 @@ def copier_et_verifier(src, dst, run=subprocess.run):
         try:
             # Environnement bâti DE ZÉRO, pas dérivé de `os.environ` : le job exporte GITHUB_TOKEN (et gh/docker peuvent
             # lire d'autres variables d'auth) ; une relecture « anonyme » qui en hérite lirait un package privé.
-            anonyme = _crane(run, "digest", dst, env={"PATH": os.environ.get("PATH", ""), "HOME": vide, "DOCKER_CONFIG": vide})
+            # Seules passent les variables de RÉSEAU/CA : sans elles, un runner derrière un proxy ou une CA interne ferait
+            # échouer la relecture pour une cause qui n'a rien à voir avec la visibilité du package.
+            env = {k: v for k, v in os.environ.items() if k in VARIABLES_RESEAU}
+            env.update(PATH=os.environ.get("PATH", ""), HOME=vide, DOCKER_CONFIG=vide)
+            anonyme = _crane(run, "digest", dst, env=env)
         except CopieError as e:
-            raise CopieError(f"{dst} illisible en anonyme : le package ghcr n'est pas public (Package settings > "
-                             f"Change visibility) — les pulls anonymes du pod de build feront 401. {e}") from None
+            raise CopieError(f"{dst} illisible en anonyme — cause probable : package ghcr privé (Package settings > "
+                             f"Change visibility ; les pulls anonymes du pod de build feraient 401) ; sinon réseau ou CA. {e}") from None
     if anonyme != digest:
         raise CopieError(f"lecture anonyme : digest {anonyme} ≠ {digest} ({dst})")
     return digest

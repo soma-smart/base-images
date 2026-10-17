@@ -155,17 +155,27 @@ jobs:
         # ⚠️ JAMAIS sur une PR : une PR construit et scanne pour prouver que le socle
         # tient encore, elle ne publie pas. Publier depuis une branche non mergée
         # redigesterait le tag mouvant que tous les consommateurs épinglent.
-        if: github.event_name != 'pull_request'
+        # `ref == main` : un `workflow_dispatch` depuis une branche pousserait sinon le tag mouvant que tous les
+        # consommateurs épinglent, SANS copie ghcr (ses steps sont limités à main) — puis pinguerait le succès :
+        # Harbor et ghcr divergeraient en silence et le dead-man's switch serait remis à zéro.
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           VERSION: ${{ matrix.version }}
         run: docker push "registry-dev.soma-smart.cloud/base/python-slim:${VERSION}"
 
-      - name: Installer crane
-        # Version ÉPINGLÉE + SHA-256 vérifié (pas de script `main` flottant comme pour trivy) :
-        # cet outil écrit sur ghcr avec un jeton à droits d'écriture.
-        # ⚠️ Dette : aucun manager Renovate ne voit cette version — la bumper à la main.
+      - name: Copier vers ghcr (même digest, lisible en anonyme, sinon échec)
+        # Installation de crane ET copie dans UN seul step : deux steps portant la même condition pouvaient diverger à
+        # l'édition (installation sautée = rouge bruyant ; copie sautée = vert et ping de succès, silencieux).
+        # Version de crane ÉPINGLÉE + SHA-256 vérifié (pas de script `main` flottant comme pour trivy) : cet outil écrit sur
+        # ghcr avec un jeton à droits d'écriture. ⚠️ Dette : aucun manager Renovate ne voit cette version — à bumper à la main.
+        # Le pod de build des MCP (namespace arc-mcp) ne peut PAS joindre Harbor : il tire ses bases d'ici, en anonyme — le
+        # package ghcr doit donc être PUBLIC (geste manuel, cf. README). Copie APRÈS le gate Trivy et le push Harbor, par
+        # digest ; placée AVANT « Signal de vie » : un échec fait pinger `/fail`, la copie est couverte par le dead-man's
+        # switch existant. `ref == main` : une branche ne doit pas publier sur un registre PUBLIC.
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
+          VERSION: ${{ matrix.version }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CRANE_VERSION: v0.22.1
           CRANE_SHA256: 0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0
         run: |
@@ -174,20 +184,7 @@ jobs:
           curl -sfL -o /tmp/crane.tgz "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
           echo "${CRANE_SHA256}  /tmp/crane.tgz" | sha256sum -c -
           tar -xzf /tmp/crane.tgz -C "$HOME/.local/bin" crane
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Copier vers ghcr (même digest, sinon échec)
-        # Le pod de build des MCP (namespace arc-mcp) ne peut PAS joindre Harbor : il tire ses bases
-        # d'ici, en anonyme — le package ghcr doit donc être PUBLIC (geste manuel, cf. plan). Copie
-        # APRÈS le gate Trivy et le push Harbor, par digest ; placée AVANT « Signal de vie » : un
-        # échec fait pinger `/fail`, la copie est donc couverte par le dead-man's switch existant.
-        # `ref == main` : un `workflow_dispatch` lancé depuis une branche pousserait sinon sur un registre PUBLIC.
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        env:
-          VERSION: ${{ matrix.version }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -eu
+          export PATH="$HOME/.local/bin:$PATH"
           echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           python3 scripts/copie_ghcr.py \
             "registry-dev.soma-smart.cloud/base/python-slim:${VERSION}" \
@@ -216,7 +213,8 @@ jobs:
         # check et REPOUSSERAIT l'échéance du dead-man's switch — une nuit rouge
         # passerait alors inaperçue parce que quelqu'un a ouvert une PR verte entre
         # deux. Le signal doit rester celui de l'exécution qui publie.
-        if: always() && github.event_name != 'pull_request'
+        # Mêmes conditions que la publication : le signal est celui de l'exécution qui publie (donc pas d'une branche).
+        if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           HC_URL: ${{ secrets.HEALTHCHECKS_URL_BUILD_PYTHON_SLIM }}
           RESULTAT: ${{ job.status }}
