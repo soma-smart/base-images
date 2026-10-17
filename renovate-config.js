@@ -291,6 +291,7 @@ module.exports = {
         "registry-dev.soma-smart.cloud/base/python",
         "registry-dev.soma-smart.cloud/base/python-slim",
         // Copies publiques sur ghcr (même digest) : le pod de build des MCP ne joint pas Harbor.
+        // ⚠️ Aujourd'hui SEUL `python-slim` est copié ; `python` (DHI) est listé d'avance, pour quand sa copie existera.
         // Sans ces noms, un FROM ghcr ne reçoit NI pinDigests NI automerge de digest : il gèle sans erreur.
         "ghcr.io/soma-smart/base/python",
         "ghcr.io/soma-smart/base/python-slim",
@@ -305,6 +306,7 @@ module.exports = {
         "registry-dev.soma-smart.cloud/base/python",
         "registry-dev.soma-smart.cloud/base/python-slim",
         // Copies publiques sur ghcr (même digest) : le pod de build des MCP ne joint pas Harbor.
+        // ⚠️ Aujourd'hui SEUL `python-slim` est copié ; `python` (DHI) est listé d'avance, pour quand sa copie existera.
         // Sans ces noms, un FROM ghcr ne reçoit NI pinDigests NI automerge de digest : il gèle sans erreur.
         "ghcr.io/soma-smart/base/python",
         "ghcr.io/soma-smart/base/python-slim",
