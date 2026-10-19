@@ -40,6 +40,15 @@ python:<ver>-slim  ──(build nocturne + libgomp1 + non-root 65532)──▶  
 - **Versions** : `3.14` (finops). Étendre la matrice quand une autre app scientifique arrive.
 - **Choisir la base** : app standard → `base/python` (distroless, le plus dur) ; app scientifique (scipy/sklearn/pandas lourd, ou qui invoque un binaire système) → `base/python-slim`.
 
+## `base/alpine` — conteneur de job des builds MCP (copie, pas construction)
+
+`docker.io/library/alpine:<X.Y.Z>@sha256:…` (épinglé par la ligne `FROM` de `alpine/Dockerfile`, tenue par Renovate) ──(gate Trivy sur CE digest)──▶ `ghcr.io/soma-smart/base/alpine:<X.Y.Z>` (même digest, index multi-architecture entier). Consommateur : le `container: image:` des workflows de `mcp-servers` (namespace `arc-mcp`, qui ne joint ni Harbor ni Docker Hub). Il exécute des étapes d'auteur non relues : une branche Alpine hors support n'y reçoit plus aucun correctif (la 3.20 est sortie de support le 2026-04-01 ; la 3.21 le sera le 2026-11-01 — viser la branche maintenue la plus récente).
+- **Workflow** `.github/workflows/copie-alpine.yml` : cron nocturne (relit la visibilité du package et les CVE parues après la copie), push sur `alpine/**`, `workflow_dispatch`. Sur PR : scan seul, jamais de publication.
+- **Verdict Trivy** : `scripts/verdict_trivy.py` (partagé avec `build-python-slim`) — couverture prouvée, `EOSL` refusé, CVE fixable Critical/High = échec, sans exception.
+- **Écart assumé** : pas de passage par Harbor (son seul consommateur est ghcr) ; on perd le scan-on-push de Harbor, remplacé par ce gate.
+- **Gestes manuels** : package ghcr **public** (irréversible) — le premier run est rouge par construction ; secret `HEALTHCHECKS_URL_COPIE_ALPINE` (sinon dead-man's switch inerte, signalé en avertissement).
+- ⚠️ Un consommateur qui épingle `ghcr.io/soma-smart/base/alpine:<X.Y.Z>@sha256:…` dans un `container: image:` n'est suivi par Renovate que si le dépôt est dans son périmètre ET que le manager `github-actions` y voit l'image : la config valide ne le prouve pas, lire le *Dependency Dashboard*. Une datasource `docker` sur ghcr n'a pas d'horodatage : la maturité de 3 jours ne s'y applique pas, la vérifier à la main sur la PR.
+
 ## Workflow
 
 `.github/workflows/mirror-dhi.yml` — matrix par version : pull DHI → retag → gate Trivy → push Harbor. Idempotent (un digest inchangé = no-op).

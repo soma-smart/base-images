@@ -14,7 +14,11 @@ job resterait vert pendant que le pod de build (anonyme) reçoit un 401. Un pack
 `GITHUB_TOKEN` est privé tant que quelqu'un ne l'a pas basculé à la main, et peut le redevenir :
 la relecture tourne donc à chaque exécution, avec un `DOCKER_CONFIG` vide.
 
-Usage : copie_ghcr.py <source repo:tag> <destination repo:tag> — code 0 = digests égaux et
+⚠️ SOURCE ÉPINGLÉE. Une source `repo[:tag]@sha256:…` fixe le digest À L'AVANCE : c'est celui qu'un gate a déjà scanné, et le
+résoudre une seconde fois par le tag laisserait un rebuild amont le déplacer entre le scan et la copie (on publierait un objet
+jamais scanné). Le digest donné EST alors celui copié, et l'égalité est assertée sur la destination.
+
+Usage : copie_ghcr.py <source repo:tag | repo[:tag]@sha256:…> <destination repo:tag> — code 0 = digests égaux et
 destination lisible sans identifiants.
 """
 import os
@@ -46,18 +50,26 @@ def _crane(run, *args, env=None):
 
 
 def _depot(src):
-    """`repo` d'une référence `repo:tag`. Refuse `repo@sha256:…` et `host:port/repo` (aucun tag : le `:` est celui du port)."""
+    """(`repo`, digest ou None) d'une source `repo:tag` (digest None : à résoudre) ou `repo[:tag]@sha256:…` (digest épinglé).
+    Refuse une source sans tag ni digest, dont `host:port/repo` (le `:` est celui du port)."""
+    if "@" in src:
+        nom, _, digest = src.partition("@")
+        if not DIGEST.match(digest):
+            raise CopieError(f"digest épinglé illisible dans la source : {src!r}")
+        reste, sep, tag = nom.rpartition(":")
+        return (reste if sep and "/" not in tag else nom), digest
     nom, sep, tag = src.rpartition(":")
-    if "@" in src or not sep or "/" in tag:
-        raise CopieError(f"la source doit être `repo:tag` (un tag, pas un digest ni un simple port) : {src!r}")
-    return nom
+    if not sep or "/" in tag:
+        raise CopieError(f"la source doit être `repo:tag` ou `repo@sha256:…` (pas un simple port) : {src!r}")
+    return nom, None
 
 
 def copier_et_verifier(src, dst, run=subprocess.run):
-    depot = _depot(src)
-    digest = _crane(run, "digest", src)
-    if not DIGEST.match(digest):
-        raise CopieError(f"digest source illisible pour {src} : {digest!r}")
+    depot, digest = _depot(src)
+    if digest is None:
+        digest = _crane(run, "digest", src)
+        if not DIGEST.match(digest):
+            raise CopieError(f"digest source illisible pour {src} : {digest!r}")
     _crane(run, "copy", f"{depot}@{digest}", dst)
     obtenu = _crane(run, "digest", dst)
     if obtenu != digest:

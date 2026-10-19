@@ -295,6 +295,8 @@ module.exports = {
         // Sans ces noms, un FROM ghcr ne reçoit NI pinDigests NI automerge de digest : il gèle sans erreur.
         "ghcr.io/soma-smart/base/python",
         "ghcr.io/soma-smart/base/python-slim",
+        // Alpine (conteneur de job des builds MCP) : copie ghcr de `docker.io/library/alpine`, épinglée par `alpine/Dockerfile`.
+        "ghcr.io/soma-smart/base/alpine",
       ],
       pinDigests: true,
     },
@@ -310,6 +312,8 @@ module.exports = {
         // Sans ces noms, un FROM ghcr ne reçoit NI pinDigests NI automerge de digest : il gèle sans erreur.
         "ghcr.io/soma-smart/base/python",
         "ghcr.io/soma-smart/base/python-slim",
+        // Alpine (conteneur de job des builds MCP) : copie ghcr de `docker.io/library/alpine`, épinglée par `alpine/Dockerfile`.
+        "ghcr.io/soma-smart/base/alpine",
       ],
       matchUpdateTypes: ["digest", "pinDigest"],
       automerge: true,

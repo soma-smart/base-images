@@ -94,10 +94,21 @@ def jouer():
     attend_echec("source_digest_trop_long", faux_crane(src=A + "a", dst=A + "a"), ["illisible"], copie_interdite=True)
     attend_echec("source_digest_majuscules", faux_crane(src="sha256:" + "A" * 64, dst="sha256:" + "A" * 64), ["illisible"], copie_interdite=True)
     attend_echec("source_sans_tag_avec_port", faux_crane(), ["tag"], src="host:5000/x", copie_interdite=True)
-    attend_echec("source_deja_un_digest", faux_crane(), ["tag"], src=f"host/x@{A}", copie_interdite=True)
+    attend_echec("digest_epingle_illisible", faux_crane(), ["illisible"], src="host/x:1@sha256:abc", copie_interdite=True)
+    attend_echec("digest_epingle_majuscules", faux_crane(), ["illisible"], src="host/x@sha256:" + "A" * 64, copie_interdite=True)
+    attend_echec("digest_epingle_mais_destination_voisine", faux_crane(dst=B), [A, B], src=f"host/x:1@{A}")
     attend_echec("crane_introuvable", faux_crane(leve=FileNotFoundError("crane")), ["crane"])
     attend_echec("delai_depasse", faux_crane(leve=subprocess.TimeoutExpired("crane", 1)), ["delai"])
-    n += 17
+    n += 19
+    # Source ÉPINGLÉE (`repo:tag@sha256:…` ou `repo@sha256:…`) : le digest donné EST celui copié, aucune résolution de la source
+    # par le tag (un rebuild amont entre le scan et la copie publierait un objet jamais scanné).
+    for src in (f"docker.io/library/alpine:3.24.2@{A}", f"docker.io/library/alpine@{A}"):
+        run, appels = faux_crane()
+        assert copier_et_verifier(src, DST, run=run) == A, src
+        assert not any(a[1] == "digest" and a[2] == src for a, _ in appels), f"{src} : la source épinglée ne doit pas être résolue"
+        assert copies(appels)[0][2] == f"docker.io/library/alpine@{A}", f"copie depuis autre chose que le digest épinglé : {copies(appels)}"
+        assert any(kw.get("env") for _, kw in appels), "aucune relecture anonyme"
+        n += 3
     r = subprocess.run([sys.executable, str(Path(__file__).with_name("copie_ghcr.py")), SRC, DST],
                        capture_output=True, text=True, env={"PATH": "/nonexistent"})
     assert r.returncode != 0 and "ERREUR:" in r.stderr, (r.returncode, r.stderr)
