@@ -174,8 +174,10 @@ module.exports = {
       customType: "regex",
       managerFilePatterns: ["/(^|/)Dockerfile$/"],
       // ⚠️ Ancré, comme celui de GH_VERSION plus bas : un motif non ancré matche une
-      // ligne commentée. Et exige le `v` : c'est ce qui sépare ce motif du motif de
-      // transition ci-dessous, pour qu'une ligne n'en matche jamais deux.
+      // ligne commentée. Et exige le `v` (cf. plus haut : la datasource demande la
+      // release par tag). Une forme SANS `v` n'est donc plus suivie du tout, en silence :
+      // `scripts/test_motifs_multica.mjs` le fige, et la garde d'adjacence de
+      // multica-runtime (`build.yml`) refuse un Dockerfile qui l'aurait.
       matchStrings: [
         "(?m)^\\s*ARG MULTICA_VERSION=(?<currentValue>v[0-9][^\\s#]*)\\n\\s*ARG MULTICA_SHA256=(?<currentDigest>[a-f0-9]{64})",
       ],
@@ -183,25 +185,6 @@ module.exports = {
       datasourceTemplate: "github-release-attachments",
       autoReplaceStringTemplate:
         "ARG MULTICA_VERSION={{{newValue}}}\nARG MULTICA_SHA256={{{newDigest}}}",
-    },
-    {
-      // ⚠️ TRANSITOIRE — À RETIRER dès que `multica-runtime` porte `ARG MULTICA_VERSION=v…`
-      // (PR jumelle `soma-smart/multica-runtime#89`).
-      // ⚠️ L'ORDRE DE MERGE COMPTE : cette config d'ABORD, le Dockerfile ensuite. Ce motif
-      // garde l'ancienne forme (sans `v`, hash non suivi) suivie dans l'intervalle. Si le
-      // Dockerfile `v…` passait AVANT, le motif en vigueur (`[^\s#]+`, `github-releases`,
-      // `extractVersion`) matcherait `v0.x.y` mais proposerait `0.x.y` SANS `v` : une PR
-      // dont l'URL de téléchargement n'existe pas (rouge, bruyant — mesuré au dry-run).
-      // Retrait : constater la section `custom.regex` du Dependency Dashboard de
-      // `multica-runtime`, qui doit lister `multica-ai/multica` en `v…` — ce constat
-      // porte sur le motif NOUVEAU, l'ancien ne matchant plus rien une fois migré.
-      description: "ARG MULTICA_VERSION (Dockerfile) — ancienne forme sans `v` (transitoire)",
-      customType: "regex",
-      managerFilePatterns: ["/(^|/)Dockerfile$/"],
-      matchStrings: ["(?m)^\\s*ARG MULTICA_VERSION=(?<currentValue>[0-9][^\\s#]*)"],
-      depNameTemplate: "multica-ai/multica",
-      datasourceTemplate: "github-releases",
-      extractVersionTemplate: "^v(?<version>.*)$",
     },
     {
       // Le paquet vient du dépôt apt d'Anthropic — ni Debian, ni un registre
