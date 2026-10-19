@@ -109,6 +109,20 @@ def jouer():
         assert copies(appels)[0][2] == f"docker.io/library/alpine@{A}", f"copie depuis autre chose que le digest épinglé : {copies(appels)}"
         assert any(kw.get("env") for _, kw in appels), "aucune relecture anonyme"
         n += 3
+    # Source épinglée AVEC PORT d'hôte : le `:` du port n'est pas un tag (sinon `host:5000/x@…` deviendrait le dépôt `host`).
+    for src in (f"host:5000/x@{A}", f"host:5000/x:1@{A}"):
+        run, appels = faux_crane()
+        copier_et_verifier(src, DST, run=run)
+        assert copies(appels)[0][2] == f"host:5000/x@{A}", f"{src} : dépôt mal extrait : {copies(appels)}"
+        n += 1
+    # AUCUNE résolution de la source épinglée : la seule lecture de digest autorisée est celle de la destination. Une source dont
+    # le tag pointerait AILLEURS (src=B) ne change rien : on copie le digest scanné (A), jamais celui que le tag désigne maintenant.
+    run, appels = faux_crane(src=B)
+    assert copier_et_verifier(f"docker.io/library/alpine:3.24.2@{A}", DST, run=run) == A
+    lectures = [a[2] for a, _ in appels if a[1] == "digest" and a[2] != DST]
+    assert not lectures, f"la source épinglée a été résolue : {lectures}"
+    assert copies(appels)[0][2] == f"docker.io/library/alpine@{A}"
+    n += 2
     r = subprocess.run([sys.executable, str(Path(__file__).with_name("copie_ghcr.py")), SRC, DST],
                        capture_output=True, text=True, env={"PATH": "/nonexistent"})
     assert r.returncode != 0 and "ERREUR:" in r.stderr, (r.returncode, r.stderr)

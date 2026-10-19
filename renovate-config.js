@@ -296,6 +296,7 @@ module.exports = {
         "ghcr.io/soma-smart/base/python",
         "ghcr.io/soma-smart/base/python-slim",
         // Alpine (conteneur de job des builds MCP) : copie ghcr de `docker.io/library/alpine`, épinglée par `alpine/Dockerfile`.
+        // ⚠️ INERTE tant que le dépôt consommateur (`mcp-servers`) n'est pas dans le périmètre de Renovate (constaté le 2026-10-19).
         "ghcr.io/soma-smart/base/alpine",
       ],
       pinDigests: true,
@@ -313,6 +314,7 @@ module.exports = {
         "ghcr.io/soma-smart/base/python",
         "ghcr.io/soma-smart/base/python-slim",
         // Alpine (conteneur de job des builds MCP) : copie ghcr de `docker.io/library/alpine`, épinglée par `alpine/Dockerfile`.
+        // ⚠️ INERTE tant que le dépôt consommateur (`mcp-servers`) n'est pas dans le périmètre de Renovate (constaté le 2026-10-19).
         "ghcr.io/soma-smart/base/alpine",
       ],
       matchUpdateTypes: ["digest", "pinDigest"],

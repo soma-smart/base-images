@@ -18,6 +18,8 @@ on:
     paths:
       - "python-slim/**"
       - ".github/workflows/build-python-slim.yml"
+      # Le verdict Trivy y est partagé : une PR qui le modifie doit rejouer ce gate de bout en bout.
+      - "scripts/verdict_trivy.py"
 concurrency:
   group: build-python-slim
   cancel-in-progress: false
@@ -92,7 +94,8 @@ jobs:
             "$IMAGE" > trivy.json
 
           # Verdict commun à tous les socles : `scripts/verdict_trivy.py` (testé par `scripts/test_verdict_trivy.py`).
-          python3 scripts/verdict_trivy.py trivy.json "$IMAGE"
+          python3 scripts/verdict_trivy.py trivy.json "$IMAGE" \
+            "vérifier d'abord que le \`dist-upgrade\` du Dockerfile a bien tout appliqué (le correctif Debian peut n'être pas encore publié), puis n'attendre l'amont qu'en dernier recours."
       - name: Push (idempotent — no-op si digest inchangé)
         # ⚠️ JAMAIS sur une PR : une PR construit et scanne pour prouver que le socle
         # tient encore, elle ne publie pas. Publier depuis une branche non mergée

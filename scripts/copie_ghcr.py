@@ -28,7 +28,7 @@ import sys
 import tempfile
 
 DELAI_S = 300
-DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+DIGEST = re.compile(r"^sha256:[0-9a-f]{64}\Z")
 VARIABLES_RESEAU = frozenset({"SSL_CERT_FILE", "SSL_CERT_DIR", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
                               "https_proxy", "http_proxy", "no_proxy"})
 

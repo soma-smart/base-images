@@ -3,8 +3,11 @@ name: copie-alpine
 # (dépôt mcp-servers, namespace arc-mcp : il ne joint ni Harbor ni Docker Hub, il tire ses bases de ghcr en anonyme). Cette image
 # exécute des étapes d'auteur NON relues : une branche Alpine hors support n'y reçoit plus aucun correctif.
 #
-# Source de vérité = l'unique ligne FROM de `alpine/Dockerfile` (version ET digest), tenue par Renovate (horodatage de Docker Hub :
-# sa maturité de 3 jours s'applique). Le digest scanné EST le digest copié : on ne résout jamais le tag une seconde fois.
+# Source de vérité = l'unique ligne FROM de `alpine/Dockerfile` (version ET digest). ⚠️ BUMP MANUEL : ce dépôt n'est pas dans le
+# périmètre de Renovate (constaté le 2026-10-19) ; l'alarme est le cron ci-dessous, rouge à la première CVE corrigeable ou à la fin
+# de support. Le digest scanné EST le digest copié (Trivy est lancé sur `--platform linux/amd64` ; l'INDEX entier est copié pour
+# garder le même digest, ses autres plateformes ne sont pas scannées et aucun consommateur ne les tire) : le tag n'est jamais
+# résolu une seconde fois.
 # ⚠️ Écart assumé : pas de passage par Harbor (son seul consommateur est ghcr). On perd le scan-on-push de Harbor, remplacé par le
 # gate Trivy ci-dessous, qui rend son verdict par `scripts/verdict_trivy.py` (couverture PROUVÉE avant absence de CVE).
 # ⚠️ PREMIER RUN ROUGE PAR CONSTRUCTION : le package ghcr est créé PRIVÉ, la relecture anonyme échoue exprès. Geste manuel de
@@ -39,16 +42,17 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Rien ici ne pousse sur git : le jeton `packages: write` ne doit pas rester dans `.git/config` pendant que du code s'exécute.
+          persist-credentials: false
       - name: Lire la source épinglée (une seule ligne FROM, tag ET digest)
         run: |
           set -eu
           n=$(grep -c '^FROM ' alpine/Dockerfile || true)
           [ "$n" = 1 ] || { echo "ERREUR: alpine/Dockerfile doit porter UNE ligne FROM (trouvé $n)"; exit 1; }
           ref=$(sed -n 's/^FROM \([^ ]*\)$/\1/p' alpine/Dockerfile)
-          case "$ref" in
-            docker.io/library/alpine:[0-9]*.[0-9]*.[0-9]*@sha256:????????????????????????????????????????????????????????????????) ;;
-            *) echo "ERREUR: FROM inattendu (attendu docker.io/library/alpine:X.Y.Z@sha256:<64 hex>) : $ref"; exit 1 ;;
-          esac
+          printf '%s\n' "$ref" | grep -Eq '^docker\.io/library/alpine:[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$' \
+            || { echo "ERREUR: FROM inattendu (attendu docker.io/library/alpine:X.Y.Z@sha256:<64 hex>) : $ref"; exit 1; }
           tag=${ref#*:}; tag=${tag%@*}
           digest=${ref#*@}
           { echo "SRC_REF=$ref"; echo "TAG=$tag"; echo "DIGEST=$digest"; } >> "$GITHUB_ENV"
@@ -71,7 +75,7 @@ jobs:
         run: |
           set -eu
           IMAGE="docker.io/library/alpine@${DIGEST}"
-          trivy image --format json --list-all-pkgs --ignore-unfixed --severity CRITICAL,HIGH "$IMAGE" > trivy.json
+          trivy image --platform linux/amd64 --format json --list-all-pkgs --ignore-unfixed --severity CRITICAL,HIGH "$IMAGE" > trivy.json
           python3 scripts/verdict_trivy.py trivy.json "$IMAGE"
       - name: Copier vers ghcr (même digest, index multi-architecture entier, lisible en anonyme, sinon échec)
         # Installation de crane ET copie dans UN seul step (deux steps à la même condition pouvaient diverger). Version ÉPINGLÉE +
