@@ -150,19 +150,24 @@ module.exports = {
   customManagers: [
     {
       // ⚠️ VERSION ET HASH SONT UNE PAIRE : `MULTICA_SHA256` est épinglé juste sous
-      // `MULTICA_VERSION`, et ce motif lit les deux lignes CONSÉCUTIVES. La datasource
-      // `github-release-attachments` retrouve, dans `checksums.txt` de la release
-      // courante, le fichier dont le hash est `currentDigest`, puis lit la ligne du
-      // MÊME nom dans la nouvelle release : `multica_linux_amd64.tar.gz` doit donc
-      // garder son nom d'une release à l'autre (sinon plus de hash proposé — la PR
-      // ouvre alors sans lui et le build rouge le dit).
+      // `MULTICA_VERSION`, et ce motif lit les deux lignes CONSÉCUTIVES, version d'abord.
+      // La datasource `github-release-attachments` cherche dans `checksums.txt` de la
+      // release courante la PREMIÈRE ligne dont le hash est `currentDigest`, retient le
+      // nom de fichier de cette ligne, puis lit la ligne de ce nom dans la nouvelle
+      // release (la version y est substituée). Pour multica cette première ligne est
+      // `multica-cli-<ver>-linux-amd64.tar.gz`, pas l'alias `multica_linux_amd64.tar.gz`
+      // (identiques octet pour octet) : le Dockerfile consommateur doit donc télécharger
+      // LE FICHIER VERSIONNÉ. Si le nom ne se retrouve pas dans la release suivante, le
+      // hash proposé est absent ou resté ancien : build rouge sur `sha256sum -c`, jamais
+      // un bump silencieusement faux.
       // ⚠️ La valeur porte son `v` : cette datasource demande la release par TAG
-      // (`v0.6.3`) ; avec `extractVersion` qui le retire, elle interroge `0.6.3` et
-      // le lookup échoue en 404 (mesuré au dry-run du 2026-10-19, Renovate 43 et 44).
+      // (`releases/tags/<valeur>`). Avec `extractVersion` qui retire le `v`, elle
+      // interroge `0.6.3` et le lookup échoue en 404. Revérifier d'un lookup local :
+      // `renovate --platform=local` sur un Dockerfile type, sans PR.
       // ⚠️ Même racine de confiance que `checksums.txt` : ce hash ne protège pas d'une
       // release recoupée AVANT la PR. Le contrôle est la relecture de la PR (jamais
       // d'automerge, cf. packageRules) ; le gate `sha256sum -c` du build attrape, lui,
-      // une release recoupée APRÈS. Ne pas retirer l'épingle du hash.
+      // une release recoupée APRÈS le merge de la PR. Ne pas retirer l'épingle du hash.
       description: "ARG MULTICA_VERSION + MULTICA_SHA256 (Dockerfile) — daemon multica, forme `vX.Y.Z`",
       customType: "regex",
       managerFilePatterns: ["/(^|/)Dockerfile$/"],
@@ -178,13 +183,16 @@ module.exports = {
         "ARG MULTICA_VERSION={{{newValue}}}\nARG MULTICA_SHA256={{{newDigest}}}",
     },
     {
-      // ⚠️ TRANSITOIRE — À RETIRER dès que `multica-runtime` porte `ARG MULTICA_VERSION=v…`.
-      // Ancienne forme (sans `v`, hash non suivi) : ce motif existe pour que l'ordre de
-      // merge entre ce fichier et le Dockerfile n'ait pas d'importance — sans lui, merger
-      // la config AVANT le Dockerfile éteindrait le suivi de multica en silence (aucun
-      // motif ne matche, aucune erreur, aucune PR : la panne du 2026-08-11). Son départ
-      // ne se constate que par la section `custom.regex` du Dependency Dashboard de
-      // `multica-runtime`, qui doit lister `multica-ai/multica` AVANT comme APRÈS.
+      // ⚠️ TRANSITOIRE — À RETIRER dès que `multica-runtime` porte `ARG MULTICA_VERSION=v…`
+      // (PR jumelle `soma-smart/multica-runtime#89`).
+      // ⚠️ L'ORDRE DE MERGE COMPTE : cette config d'ABORD, le Dockerfile ensuite. Ce motif
+      // garde l'ancienne forme (sans `v`, hash non suivi) suivie dans l'intervalle. Si le
+      // Dockerfile `v…` passait AVANT, le motif en vigueur (`[^\s#]+`, `github-releases`,
+      // `extractVersion`) matcherait `v0.x.y` mais proposerait `0.x.y` SANS `v` : une PR
+      // dont l'URL de téléchargement n'existe pas (rouge, bruyant — mesuré au dry-run).
+      // Retrait : constater la section `custom.regex` du Dependency Dashboard de
+      // `multica-runtime`, qui doit lister `multica-ai/multica` en `v…` — ce constat
+      // porte sur le motif NOUVEAU, l'ancien ne matchant plus rien une fois migré.
       description: "ARG MULTICA_VERSION (Dockerfile) — ancienne forme sans `v` (transitoire)",
       customType: "regex",
       managerFilePatterns: ["/(^|/)Dockerfile$/"],
@@ -260,8 +268,8 @@ module.exports = {
       datasourceTemplate: "docker",
     },
     {
-      // ⚠️ CELUI-CI N'A PAS DE HASH JUMEAU, contrairement à `MULTICA_VERSION` juste
-      // au-dessus — et il ne faut pas lui en chercher un. `gh` n'est pas téléchargé :
+      // ⚠️ CELUI-CI N'A PAS DE HASH JUMEAU, contrairement au motif `MULTICA_VERSION` +
+      // `MULTICA_SHA256` plus haut — et il ne faut pas lui en chercher un. `gh` n'est pas téléchargé :
       // il est COMPILÉ dans le dépôt consommateur, par un module enveloppe
       // (`go mod init` + `go get <PAQUET>@<ver>` + `go build`) — et c'est la toolchain
       // Go qui vérifie contre `sum.golang.org`. Rien à recalculer à la main, donc.
@@ -563,11 +571,10 @@ module.exports = {
       // Ce que ces épingles gouvernent n'est pas une dépendance applicative
       // ordinaire : le daemon qui EXÉCUTE les tâches de l'agent, la CLI qu'il
       // fait tourner, et le scanner censé prouver que l'image est saine.
-      // ⚠️ CE `false` EST DEVENU LE SEUL GARDE-FOU du bump de multica. Tant que le
-      // hash n'était pas calculable, la PR sortait ROUGE et ne pouvait pas être
-      // automergée de toute façon ; depuis que Renovate propose version ET hash, elle
-      // sort verte, et seule cette ligne empêche un daemon à jeton d'écriture d'être
-      // monté sans qu'un humain ait relu la paire version/hash.
+      // ⚠️ `false` est ce qui force la relecture humaine de la paire version/hash de
+      // multica : version et hash viennent de la même source, donc la PR sort verte, et
+      // sans lui elle serait mergée sans relecture, alors qu'elle monte un daemon qui porte un jeton d'écriture.
+      // Ne pas le surcharger par une règle plus bas, pour multica en particulier.
       automerge: false,
     },
     {
