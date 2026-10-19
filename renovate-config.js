@@ -149,20 +149,56 @@ module.exports = {
   // ═══════════════════════════════════════════════════════════════════════════
   customManagers: [
     {
-      // ⚠️ Renovate ne sait PAS recalculer `MULTICA_SHA256`, épinglé juste sous
-      // cet ARG. Ses PR partiront donc ROUGES, et c'est le comportement VOULU :
-      // le Dockerfile de multica-runtime l'écrit — « échouer bruyamment vaut
-      // mieux que faire confiance en silence ». Le hash se récupère par
-      //   curl -fsSL .../releases/download/v<VER>/checksums.txt | grep ' multica_linux_amd64.tar.gz$'
-      // Ne pas « réparer » ce rouge en retirant l'épingle du hash : c'est un
-      // contrôle délibéré (une release GitHub est MUTABLE).
-      description: "ARG MULTICA_VERSION (Dockerfile) — daemon multica",
+      // ⚠️ VERSION ET HASH SONT UNE PAIRE : `MULTICA_SHA256` est épinglé juste sous
+      // `MULTICA_VERSION`, et ce motif lit les deux lignes CONSÉCUTIVES, version d'abord.
+      // La datasource `github-release-attachments` cherche dans `checksums.txt` de la
+      // release courante la PREMIÈRE ligne dont le hash est `currentDigest`, retient le
+      // nom de fichier de cette ligne, puis lit la ligne de ce nom dans la nouvelle
+      // release (la version y est substituée). Pour multica cette première ligne est
+      // `multica-cli-<ver>-linux-amd64.tar.gz`, pas l'alias `multica_linux_amd64.tar.gz`
+      // (identiques octet pour octet) : le Dockerfile consommateur doit donc télécharger
+      // LE FICHIER VERSIONNÉ. Si le nom ne se retrouve pas dans la release suivante,
+      // Renovate ne sait pas déterminer le nouveau hash : le run sort un avertissement de
+      // lookup (attrapé par `scripts/verifier-lookups.py`) et AUCUNE PR ne s'ouvre. Si
+      // c'est le hash ÉPINGLÉ qui est introuvable dans la release courante, la version
+      // monte sur l'ancien hash et seul `sha256sum -c` du build rougit.
+      // ⚠️ La valeur porte son `v` : cette datasource demande la release par TAG
+      // (`releases/tags/<valeur>`). Avec `extractVersion` qui retire le `v`, elle
+      // interroge `0.6.3` et le lookup échoue en 404. Revérifier d'un lookup local :
+      // `renovate --platform=local` sur un Dockerfile type, sans PR.
+      // ⚠️ Même racine de confiance que `checksums.txt` : ce hash ne protège pas d'une
+      // release recoupée AVANT la PR. Le contrôle est la relecture de la PR (jamais
+      // d'automerge, cf. packageRules) ; le gate `sha256sum -c` du build attrape, lui,
+      // une release recoupée APRÈS le merge de la PR. Ne pas retirer l'épingle du hash.
+      description: "ARG MULTICA_VERSION + MULTICA_SHA256 (Dockerfile) — daemon multica, forme `vX.Y.Z`",
       customType: "regex",
       managerFilePatterns: ["/(^|/)Dockerfile$/"],
-      // ⚠️ Ancré comme celui de GH_VERSION plus bas, et pour la même raison mesurée :
-      // un motif non ancré matche une ligne commentée. Défaut de famille, corrigé sur
-      // les deux motifs d'un coup plutôt que sur celui qui a mordu.
-      matchStrings: ["(?m)^\\s*ARG MULTICA_VERSION=(?<currentValue>[^\\s#]+)"],
+      // ⚠️ Ancré, comme celui de GH_VERSION plus bas : un motif non ancré matche une
+      // ligne commentée. Et exige le `v` : c'est ce qui sépare ce motif du motif de
+      // transition ci-dessous, pour qu'une ligne n'en matche jamais deux.
+      matchStrings: [
+        "(?m)^\\s*ARG MULTICA_VERSION=(?<currentValue>v[0-9][^\\s#]*)\\n\\s*ARG MULTICA_SHA256=(?<currentDigest>[a-f0-9]{64})",
+      ],
+      depNameTemplate: "multica-ai/multica",
+      datasourceTemplate: "github-release-attachments",
+      autoReplaceStringTemplate:
+        "ARG MULTICA_VERSION={{{newValue}}}\nARG MULTICA_SHA256={{{newDigest}}}",
+    },
+    {
+      // ⚠️ TRANSITOIRE — À RETIRER dès que `multica-runtime` porte `ARG MULTICA_VERSION=v…`
+      // (PR jumelle `soma-smart/multica-runtime#89`).
+      // ⚠️ L'ORDRE DE MERGE COMPTE : cette config d'ABORD, le Dockerfile ensuite. Ce motif
+      // garde l'ancienne forme (sans `v`, hash non suivi) suivie dans l'intervalle. Si le
+      // Dockerfile `v…` passait AVANT, le motif en vigueur (`[^\s#]+`, `github-releases`,
+      // `extractVersion`) matcherait `v0.x.y` mais proposerait `0.x.y` SANS `v` : une PR
+      // dont l'URL de téléchargement n'existe pas (rouge, bruyant — mesuré au dry-run).
+      // Retrait : constater la section `custom.regex` du Dependency Dashboard de
+      // `multica-runtime`, qui doit lister `multica-ai/multica` en `v…` — ce constat
+      // porte sur le motif NOUVEAU, l'ancien ne matchant plus rien une fois migré.
+      description: "ARG MULTICA_VERSION (Dockerfile) — ancienne forme sans `v` (transitoire)",
+      customType: "regex",
+      managerFilePatterns: ["/(^|/)Dockerfile$/"],
+      matchStrings: ["(?m)^\\s*ARG MULTICA_VERSION=(?<currentValue>[0-9][^\\s#]*)"],
       depNameTemplate: "multica-ai/multica",
       datasourceTemplate: "github-releases",
       extractVersionTemplate: "^v(?<version>.*)$",
@@ -234,8 +270,8 @@ module.exports = {
       datasourceTemplate: "docker",
     },
     {
-      // ⚠️ CELUI-CI N'A PAS DE HASH JUMEAU, contrairement à `MULTICA_VERSION` juste
-      // au-dessus — et il ne faut pas lui en chercher un. `gh` n'est pas téléchargé :
+      // ⚠️ CELUI-CI N'A PAS DE HASH JUMEAU, contrairement au motif `MULTICA_VERSION` +
+      // `MULTICA_SHA256` plus haut — et il ne faut pas lui en chercher un. `gh` n'est pas téléchargé :
       // il est COMPILÉ dans le dépôt consommateur, par un module enveloppe
       // (`go mod init` + `go get <PAQUET>@<ver>` + `go build`) — et c'est la toolchain
       // Go qui vérifie contre `sum.golang.org`. Rien à recalculer à la main, donc.
@@ -536,10 +572,11 @@ module.exports = {
       // ⚠️ Pas d'automerge, à dessein, et contrairement aux trois autres familles.
       // Ce que ces épingles gouvernent n'est pas une dépendance applicative
       // ordinaire : le daemon qui EXÉCUTE les tâches de l'agent, la CLI qu'il
-      // fait tourner, et le scanner censé prouver que l'image est saine. Et le
-      // bump de multica part ROUGE par construction (hash non calculable) : un
-      // automerge n'aurait de toute façon jamais lieu, mais mieux vaut que ce
-      // soit une décision qu'un effet de bord.
+      // fait tourner, et le scanner censé prouver que l'image est saine.
+      // ⚠️ `false` est ce qui force la relecture humaine de la paire version/hash de
+      // multica : version et hash viennent de la même source, donc la PR sort verte, et
+      // sans lui elle serait mergée sans relecture, alors qu'elle monte un daemon qui porte un jeton d'écriture.
+      // Ne pas le surcharger par une règle plus bas, pour multica en particulier.
       automerge: false,
     },
     {
