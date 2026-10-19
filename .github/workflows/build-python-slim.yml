@@ -18,6 +18,8 @@ on:
     paths:
       - "python-slim/**"
       - ".github/workflows/build-python-slim.yml"
+      # Le verdict Trivy y est partagé : une PR qui le modifie doit rejouer ce gate de bout en bout.
+      - "scripts/verdict_trivy.py"
 concurrency:
   group: build-python-slim
   cancel-in-progress: false
@@ -91,66 +93,9 @@ jobs:
             --ignore-unfixed --severity CRITICAL,HIGH \
             "$IMAGE" > trivy.json
 
-          ATTENDU="$IMAGE" python3 - <<'PY'
-          import json, os, sys
-
-          attendu = os.environ["ATTENDU"]
-          with open("trivy.json") as f:
-              rapport = json.load(f)
-
-          def refus(msg):
-              sys.exit(f"ERREUR: {msg}")
-
-          # Le schéma d'abord : un changement de format amont transformerait toutes les
-          # assertions suivantes en lectures de clés absentes, donc en silence.
-          schema = rapport.get("SchemaVersion")
-          if schema != 2:
-              refus(f"schéma de rapport Trivy inattendu ({schema!r}, attendu 2) — "
-                    "les assertions ci-dessous ne veulent plus rien dire.")
-
-          artefact = rapport.get("ArtifactName")
-          if artefact != attendu:
-              refus(f"Trivy a scanné '{artefact}', attendu '{attendu}'.")
-
-          meta = rapport.get("Metadata") or {}
-          os_info = meta.get("OS") or {}
-          famille = os_info.get("Family")
-          if not famille:
-              refus("Trivy n'a identifié aucun OS dans l'image.")
-
-          resultats = rapport.get("Results") or []
-          paquets = max(
-              (len(r.get("Packages") or []) for r in resultats if r.get("Class") == "os-pkgs"),
-              default=0,
-          )
-          if paquets == 0:
-              refus("aucun paquet OS énuméré. Trivy a reconnu l'OS mais n'a comparé "
-                    "AUCUN paquet aux avis de sécurité — base dpkg absente ou vide. "
-                    "Le rapport est vide par aveuglement, pas par propreté.")
-
-          if os_info.get("EOSL"):
-              refus(f"la distribution ({famille} {os_info.get('Name')}) est en FIN DE "
-                    "SUPPORT : plus aucun avis n'est publié, un scan vert ne prouve "
-                    "plus rien. Changer de base amont.")
-
-          print(f"couverture OK — artefact={artefact} os={famille} {os_info.get('Name')} "
-                f"paquets={paquets} cibles={len(resultats)}")
-
-          bloquantes = [(c.get("Target"), v) for c in resultats
-                        for v in (c.get("Vulnerabilities") or [])]
-          if bloquantes:
-              for cible, v in bloquantes:
-                  print(f"  {v['Severity']:8} {v['VulnerabilityID']:20} "
-                        f"{v.get('PkgName')} {v.get('InstalledVersion')} "
-                        f"→ {v.get('FixedVersion')}  [{cible}]")
-              refus(f"{len(bloquantes)} vulnérabilité(s) CRITICAL/HIGH corrigeable(s). "
-                    "Sur un SOCLE, elles se corrigent : vérifier d'abord que le "
-                    "`dist-upgrade` du Dockerfile a bien tout appliqué (le correctif "
-                    "Debian peut n'être pas encore publié), puis n'attendre l'amont "
-                    "qu'en dernier recours.")
-
-          print(f"aucune vulnérabilité bloquante — {paquets} paquets OS comparés.")
-          PY
+          # Verdict commun à tous les socles : `scripts/verdict_trivy.py` (testé par `scripts/test_verdict_trivy.py`).
+          python3 scripts/verdict_trivy.py trivy.json "$IMAGE" \
+            "vérifier d'abord que le \`dist-upgrade\` du Dockerfile a bien tout appliqué (le correctif Debian peut n'être pas encore publié), puis n'attendre l'amont qu'en dernier recours."
       - name: Push (idempotent — no-op si digest inchangé)
         # ⚠️ JAMAIS sur une PR : une PR construit et scanne pour prouver que le socle
         # tient encore, elle ne publie pas. Publier depuis une branche non mergée

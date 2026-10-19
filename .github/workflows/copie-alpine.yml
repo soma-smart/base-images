@@ -1,0 +1,123 @@
+name: copie-alpine
+# Copie PAR DIGEST de l'Alpine officielle vers ghcr.io/soma-smart/base/alpine:<version>, pour le CONTENEUR DE JOB des builds MCP
+# (dépôt mcp-servers, namespace arc-mcp : il ne joint ni Harbor ni Docker Hub, il tire ses bases de ghcr en anonyme). Cette image
+# exécute des étapes d'auteur NON relues : une branche Alpine hors support n'y reçoit plus aucun correctif.
+#
+# Source de vérité = l'unique ligne FROM de `alpine/Dockerfile` (version ET digest). ⚠️ BUMP MANUEL : ce dépôt n'est pas dans le
+# périmètre de Renovate (constaté le 2026-10-19) ; l'alarme est le cron ci-dessous, rouge à la première CVE corrigeable ou à la fin
+# de support. Le digest scanné EST le digest copié (Trivy est lancé sur `--platform linux/amd64` ; l'INDEX entier est copié pour
+# garder le même digest, ses autres plateformes ne sont pas scannées et aucun consommateur ne les tire) : le tag n'est jamais
+# résolu une seconde fois.
+# ⚠️ Écart assumé : pas de passage par Harbor (son seul consommateur est ghcr). On perd le scan-on-push de Harbor, remplacé par le
+# gate Trivy ci-dessous, qui rend son verdict par `scripts/verdict_trivy.py` (couverture PROUVÉE avant absence de CVE).
+# ⚠️ PREMIER RUN ROUGE PAR CONSTRUCTION : le package ghcr est créé PRIVÉ, la relecture anonyme échoue exprès. Geste manuel de
+# Gautier : GitHub > Packages > base/alpine > Change visibility > Public (irréversible), puis relancer ce workflow.
+# Le cron relit chaque nuit : il attrape un package redevenu privé et une CVE parue APRÈS la copie.
+on:
+  schedule:
+    - cron: "15 3 * * *"
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - "alpine/**"
+  # Une PR construit et scanne pour prouver que la chaîne tient, elle ne publie JAMAIS (cf. gardes `github.event_name`).
+  pull_request:
+    paths:
+      - "alpine/**"
+      - ".github/workflows/copie-alpine.yml"
+      - "scripts/copie_ghcr.py"
+      - "scripts/verdict_trivy.py"
+concurrency:
+  group: copie-alpine
+  cancel-in-progress: false
+jobs:
+  copie:
+    runs-on: onprem-dev-base-images
+    timeout-minutes: 20
+    # `packages: write` : la copie s'authentifie à ghcr avec le GITHUB_TOKEN du job (jamais un PAT : un PAT classique couvre tous
+    # les packages de son propriétaire). Accordé aussi aux PR, inutilisé sur ce chemin (steps ghcr exclus).
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Rien ici ne pousse sur git : le jeton `packages: write` ne doit pas rester dans `.git/config` pendant que du code s'exécute.
+          persist-credentials: false
+      - name: Lire la source épinglée (une seule ligne FROM, tag ET digest)
+        run: |
+          set -eu
+          n=$(grep -c '^FROM ' alpine/Dockerfile || true)
+          [ "$n" = 1 ] || { echo "ERREUR: alpine/Dockerfile doit porter UNE ligne FROM (trouvé $n)"; exit 1; }
+          ref=$(sed -n 's/^FROM \([^ ]*\)$/\1/p' alpine/Dockerfile)
+          printf '%s\n' "$ref" | grep -Eq '^docker\.io/library/alpine:[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$' \
+            || { echo "ERREUR: FROM inattendu (attendu docker.io/library/alpine:X.Y.Z@sha256:<64 hex>) : $ref"; exit 1; }
+          tag=${ref#*:}; tag=${tag%@*}
+          digest=${ref#*@}
+          { echo "SRC_REF=$ref"; echo "TAG=$tag"; echo "DIGEST=$digest"; } >> "$GITHUB_ENV"
+          echo "source épinglée : alpine $tag @ $digest"
+      - name: Install trivy
+        # Runner ARC non-root → installe dans un répertoire writable + PATH. ⚠️ Script `main` flottant, comme build-python-slim.
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Login Docker Hub (lecture de l'image amont — évite le rate-limit anonyme)
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_PAT: ${{ secrets.DOCKERHUB_PAT }}
+        run: echo "$DOCKERHUB_PAT" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+      - name: Trivy gate sur CE digest (couverture PROUVÉE, puis CVE fixable Critical/High = échec)
+        # Verdict rendu par `scripts/verdict_trivy.py`, pas par `--exit-code 1` : un scan qui n'analyse rien sort 0. Son test EOSL
+        # aurait refusé l'Alpine 3.20 (hors support). Aucun mécanisme d'exception : une base se corrige, elle ne se tolère pas.
+        run: |
+          set -eu
+          IMAGE="docker.io/library/alpine@${DIGEST}"
+          trivy image --platform linux/amd64 --format json --list-all-pkgs --ignore-unfixed --severity CRITICAL,HIGH "$IMAGE" > trivy.json
+          python3 scripts/verdict_trivy.py trivy.json "$IMAGE"
+      - name: Copier vers ghcr (même digest, index multi-architecture entier, lisible en anonyme, sinon échec)
+        # Installation de crane ET copie dans UN seul step (deux steps à la même condition pouvaient diverger). Version ÉPINGLÉE +
+        # SHA-256 vérifié : cet outil écrit sur ghcr avec un jeton à droits d'écriture. ⚠️ Dette : aucun manager Renovate ne voit
+        # cette version (idem build-python-slim). Copie de l'INDEX entier : une copie limitée à amd64 changerait le digest.
+        # `ref == main` : une branche ne doit pas publier sur un registre PUBLIC.
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CRANE_VERSION: v0.22.1
+          CRANE_SHA256: 0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0
+        run: |
+          set -eu
+          mkdir -p "$HOME/.local/bin"
+          curl -sfL -o /tmp/crane.tgz "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
+          echo "${CRANE_SHA256}  /tmp/crane.tgz" | sha256sum -c -
+          tar -xzf /tmp/crane.tgz -C "$HOME/.local/bin" crane
+          export PATH="$HOME/.local/bin:$PATH"
+          echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          python3 scripts/copie_ghcr.py "$SRC_REF" "ghcr.io/soma-smart/base/alpine:${TAG}"
+      - name: Signal de vie (dead-man's switch)
+        # Mêmes raisons que build-python-slim : le ping de succès attrape AUSSI les pannes qu'un `if: failure()` ne verrait jamais
+        # (job qui ne démarre pas, runner absent, cron désactivé). `always()` : sans lui le step serait sauté quand il a quelque
+        # chose à dire. Exclu sur PR et hors main : un succès de PR repousserait l'échéance du dead-man's switch.
+        if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          HC_URL: ${{ secrets.HEALTHCHECKS_URL_COPIE_ALPINE }}
+          RESULTAT: ${{ job.status }}
+        run: |
+          set -eu
+          if [ -z "${HC_URL:-}" ]; then
+            echo "::warning::Secret HEALTHCHECKS_URL_COPIE_ALPINE absent : le dead-man's switch est INERTE, un échec nocturne n'alertera personne."
+            {
+              echo "### ⚠️ Dead-man's switch inerte"
+              echo
+              echo "Le secret \`HEALTHCHECKS_URL_COPIE_ALPINE\` n'est pas défini : cette copie n'est surveillée par personne."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$RESULTAT" = "success" ]; then
+            curl -fsS -m 10 --retry 3 "$HC_URL" > /dev/null
+          else
+            curl -fsS -m 10 --retry 3 "$HC_URL/fail" > /dev/null
+          fi
+          echo "ping envoyé — statut $RESULTAT"

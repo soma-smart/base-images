@@ -94,10 +94,35 @@ def jouer():
     attend_echec("source_digest_trop_long", faux_crane(src=A + "a", dst=A + "a"), ["illisible"], copie_interdite=True)
     attend_echec("source_digest_majuscules", faux_crane(src="sha256:" + "A" * 64, dst="sha256:" + "A" * 64), ["illisible"], copie_interdite=True)
     attend_echec("source_sans_tag_avec_port", faux_crane(), ["tag"], src="host:5000/x", copie_interdite=True)
-    attend_echec("source_deja_un_digest", faux_crane(), ["tag"], src=f"host/x@{A}", copie_interdite=True)
+    attend_echec("digest_epingle_illisible", faux_crane(), ["illisible"], src="host/x:1@sha256:abc", copie_interdite=True)
+    attend_echec("digest_epingle_majuscules", faux_crane(), ["illisible"], src="host/x@sha256:" + "A" * 64, copie_interdite=True)
+    attend_echec("digest_epingle_mais_destination_voisine", faux_crane(dst=B), [A, B], src=f"host/x:1@{A}")
     attend_echec("crane_introuvable", faux_crane(leve=FileNotFoundError("crane")), ["crane"])
     attend_echec("delai_depasse", faux_crane(leve=subprocess.TimeoutExpired("crane", 1)), ["delai"])
-    n += 17
+    n += 19
+    # Source ÉPINGLÉE (`repo:tag@sha256:…` ou `repo@sha256:…`) : le digest donné EST celui copié, aucune résolution de la source
+    # par le tag (un rebuild amont entre le scan et la copie publierait un objet jamais scanné).
+    for src in (f"docker.io/library/alpine:3.24.2@{A}", f"docker.io/library/alpine@{A}"):
+        run, appels = faux_crane()
+        assert copier_et_verifier(src, DST, run=run) == A, src
+        assert not any(a[1] == "digest" and a[2] == src for a, _ in appels), f"{src} : la source épinglée ne doit pas être résolue"
+        assert copies(appels)[0][2] == f"docker.io/library/alpine@{A}", f"copie depuis autre chose que le digest épinglé : {copies(appels)}"
+        assert any(kw.get("env") for _, kw in appels), "aucune relecture anonyme"
+        n += 3
+    # Source épinglée AVEC PORT d'hôte : le `:` du port n'est pas un tag (sinon `host:5000/x@…` deviendrait le dépôt `host`).
+    for src in (f"host:5000/x@{A}", f"host:5000/x:1@{A}"):
+        run, appels = faux_crane()
+        copier_et_verifier(src, DST, run=run)
+        assert copies(appels)[0][2] == f"host:5000/x@{A}", f"{src} : dépôt mal extrait : {copies(appels)}"
+        n += 1
+    # AUCUNE résolution de la source épinglée : la seule lecture de digest autorisée est celle de la destination. Une source dont
+    # le tag pointerait AILLEURS (src=B) ne change rien : on copie le digest scanné (A), jamais celui que le tag désigne maintenant.
+    run, appels = faux_crane(src=B)
+    assert copier_et_verifier(f"docker.io/library/alpine:3.24.2@{A}", DST, run=run) == A
+    lectures = [a[2] for a, _ in appels if a[1] == "digest" and a[2] != DST]
+    assert not lectures, f"la source épinglée a été résolue : {lectures}"
+    assert copies(appels)[0][2] == f"docker.io/library/alpine@{A}"
+    n += 2
     r = subprocess.run([sys.executable, str(Path(__file__).with_name("copie_ghcr.py")), SRC, DST],
                        capture_output=True, text=True, env={"PATH": "/nonexistent"})
     assert r.returncode != 0 and "ERREUR:" in r.stderr, (r.returncode, r.stderr)
