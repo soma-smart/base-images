@@ -135,6 +135,26 @@ jobs:
             "' \
             < renovate-config.js
 
+      - name: Les motifs multica doivent matcher un Dockerfile type
+        # Ce que « manager et motifs appariés » ne dit PAS : un motif qui ne matche
+        # RIEN est valide et muet (la panne du 2026-08-11). Le script joue le VRAI
+        # moteur regex de Renovate (RE2, qui accepte `(?m)`) sur des Dockerfile types :
+        # exactement un des deux motifs doit matcher, une seule fois. Il fige aussi les
+        # formes NON suivies (commentaire entre les deux ARG, CRLF…) : les élargir est un
+        # geste délibéré. Le script est passé par variable d'environnement, comme la
+        # config par STDIN : pas de montage de l'espace de travail vers le démon dind.
+        env:
+          VERSION_RENOVATE: "43"
+          HARBOR_USERNAME: validation-placeholder
+          HARBOR_PASSWORD: validation-placeholder
+        run: |
+          docker run --rm -i \
+            -e HARBOR_USERNAME -e HARBOR_PASSWORD \
+            -e TEST_JS="$(cat scripts/test_motifs_multica.mjs)" \
+            "registry-dev.soma-smart.cloud/dockerhub-proxy/renovate/renovate:${VERSION_RENOVATE}" \
+            sh -c 'cat > /tmp/renovate-config.js && printf "%s" "$TEST_JS" > /tmp/t.mjs && node /tmp/t.mjs' \
+            < renovate-config.js
+
       - name: minimumReleaseAgeBehaviour doit être une valeur connue
         # ⚠️ `renovate-config-validator` NE VALIDE PAS la VALEUR de cette option — il
         # accepte n'importe quelle chaîne sans un mot (vérifié dans

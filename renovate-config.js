@@ -157,9 +157,11 @@ module.exports = {
       // release (la version y est substituée). Pour multica cette première ligne est
       // `multica-cli-<ver>-linux-amd64.tar.gz`, pas l'alias `multica_linux_amd64.tar.gz`
       // (identiques octet pour octet) : le Dockerfile consommateur doit donc télécharger
-      // LE FICHIER VERSIONNÉ. Si le nom ne se retrouve pas dans la release suivante, le
-      // hash proposé est absent ou resté ancien : build rouge sur `sha256sum -c`, jamais
-      // un bump silencieusement faux.
+      // LE FICHIER VERSIONNÉ. Si le nom ne se retrouve pas dans la release suivante,
+      // Renovate ne sait pas déterminer le nouveau hash : le run sort un avertissement de
+      // lookup (attrapé par `scripts/verifier-lookups.py`) et AUCUNE PR ne s'ouvre. Si
+      // c'est le hash ÉPINGLÉ qui est introuvable dans la release courante, la version
+      // monte sur l'ancien hash et seul `sha256sum -c` du build rougit.
       // ⚠️ La valeur porte son `v` : cette datasource demande la release par TAG
       // (`releases/tags/<valeur>`). Avec `extractVersion` qui retire le `v`, elle
       // interroge `0.6.3` et le lookup échoue en 404. Revérifier d'un lookup local :
