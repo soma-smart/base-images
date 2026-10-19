@@ -135,11 +135,11 @@ jobs:
             "' \
             < renovate-config.js
 
-      - name: Les motifs multica doivent matcher un Dockerfile type
+      - name: Le motif multica doit matcher un Dockerfile type
         # Ce que « manager et motifs appariés » ne dit PAS : un motif qui ne matche
         # RIEN est valide et muet (la panne du 2026-08-11). Le script joue le VRAI
         # moteur regex de Renovate (RE2, qui accepte `(?m)`) sur des Dockerfile types :
-        # exactement un des deux motifs doit matcher, une seule fois. Il fige aussi les
+        # le motif doit matcher, une seule fois. Il fige aussi les
         # formes NON suivies (commentaire entre les deux ARG, CRLF…) : les élargir est un
         # geste délibéré. Le script est passé par variable d'environnement, comme la
         # config par STDIN : pas de montage de l'espace de travail vers le démon dind.

@@ -1,4 +1,4 @@
-// Contre-test des motifs `multica` de renovate-config.js, joué DANS l'image Renovate.
+// Contre-test du motif `multica` de renovate-config.js, joué DANS l'image Renovate.
 //
 // ⚠️ Pourquoi dans l'image : `(?m)` n'existe pas dans le RegExp de JS, seulement dans RE2,
 // que Renovate charge en natif. Hors image, ce test refuserait le motif lui-même.
@@ -37,7 +37,7 @@ const cas = (nom, texte, attendu, verif) => {
 const entete = "# commentaire\nFROM scratch\n";
 cas("paire v…", `${entete}ARG MULTICA_VERSION=v0.6.2\nARG MULTICA_SHA256=${H}\nRUN true\n`, 1,
   (d) => d[0].currentValue === "v0.6.2" && d[0].currentDigest === H);
-cas("lignes commentées", `# ARG MULTICA_VERSION=v0.6.2\n# ARG MULTICA_SHA256=${H}\n`, 0);
+cas("version active, hash commenté", `ARG MULTICA_VERSION=v0.6.2\n# ARG MULTICA_SHA256=${H}\n`, 0);
 // Ce cas garde l'ANCRAGE `^` du motif : sans lui, une version commentée suivie d'un hash
 // actif serait lue comme une paire.
 cas("version commentée, hash actif", `# ARG MULTICA_VERSION=v0.6.2\nARG MULTICA_SHA256=${H}\n`, 0);
@@ -53,4 +53,4 @@ cas("limite : version sans v", `ARG MULTICA_VERSION=0.6.2\nARG MULTICA_SHA256=${
 cas("limite : hash en majuscules", `ARG MULTICA_VERSION=v0.6.2\nARG MULTICA_SHA256=${H.toUpperCase()}\n`, 0);
 
 if (echecs) process.exit(1);
-console.log("OK - motifs multica");
+console.log("OK - motif multica");
