@@ -38,8 +38,12 @@ const entete = "# commentaire\nFROM scratch\n";
 cas("paire v…", `${entete}ARG MULTICA_VERSION=v0.6.2\nARG MULTICA_SHA256=${H}\nRUN true\n`, 1,
   (d) => d[0].currentValue === "v0.6.2" && d[0].currentDigest === H);
 cas("ancienne forme (transitoire)", `${entete}ARG MULTICA_VERSION=0.6.2\nARG MULTICA_SHA256=${H}\n`, 1,
-  (d) => d[0].currentValue === "0.6.2" && !d[0].currentDigest);
+  (d) => d[0].currentValue === "0.6.2");
 cas("lignes commentées", `# ARG MULTICA_VERSION=v0.6.2\n# ARG MULTICA_SHA256=${H}\n`, 0);
+// Ces deux cas gardent l'ANCRAGE `^` de chaque motif : sans lui, le premier (version
+// commentée, hash actif) serait lu comme une paire, le second comme l'ancienne forme.
+cas("version commentée, hash actif", `# ARG MULTICA_VERSION=v0.6.2\nARG MULTICA_SHA256=${H}\n`, 0);
+cas("ancienne forme commentée", `# ARG MULTICA_VERSION=0.6.2\n`, 0);
 cas("indentée (stage)", `${entete}  ARG MULTICA_VERSION=v0.6.2\n  ARG MULTICA_SHA256=${H}\n`, 1);
 
 // LIMITES CONNUES : ces formes ne sont PAS suivies, en silence. Elles sont figées ici pour

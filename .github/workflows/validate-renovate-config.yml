@@ -148,9 +148,15 @@ jobs:
           HARBOR_USERNAME: validation-placeholder
           HARBOR_PASSWORD: validation-placeholder
         run: |
+          # ⚠️ Chargé AVANT le `docker run` et testé non vide : un `cat` qui échoue dans une
+          # substitution passée en argument ne déclenche pas `errexit`, `node` exécuterait
+          # alors un fichier vide et sortirait 0 — un gate vert qui ne teste rien.
+          TEST_JS="$(cat scripts/test_motifs_multica.mjs)"
+          [ -n "$TEST_JS" ] || { echo "::error::scripts/test_motifs_multica.mjs absent ou vide"; exit 1; }
+          export TEST_JS
           docker run --rm -i \
             -e HARBOR_USERNAME -e HARBOR_PASSWORD \
-            -e TEST_JS="$(cat scripts/test_motifs_multica.mjs)" \
+            -e TEST_JS \
             "registry-dev.soma-smart.cloud/dockerhub-proxy/renovate/renovate:${VERSION_RENOVATE}" \
             sh -c 'cat > /tmp/renovate-config.js && printf "%s" "$TEST_JS" > /tmp/t.mjs && node /tmp/t.mjs' \
             < renovate-config.js
