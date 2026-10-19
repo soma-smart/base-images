@@ -149,20 +149,46 @@ module.exports = {
   // ═══════════════════════════════════════════════════════════════════════════
   customManagers: [
     {
-      // ⚠️ Renovate ne sait PAS recalculer `MULTICA_SHA256`, épinglé juste sous
-      // cet ARG. Ses PR partiront donc ROUGES, et c'est le comportement VOULU :
-      // le Dockerfile de multica-runtime l'écrit — « échouer bruyamment vaut
-      // mieux que faire confiance en silence ». Le hash se récupère par
-      //   curl -fsSL .../releases/download/v<VER>/checksums.txt | grep ' multica_linux_amd64.tar.gz$'
-      // Ne pas « réparer » ce rouge en retirant l'épingle du hash : c'est un
-      // contrôle délibéré (une release GitHub est MUTABLE).
-      description: "ARG MULTICA_VERSION (Dockerfile) — daemon multica",
+      // ⚠️ VERSION ET HASH SONT UNE PAIRE : `MULTICA_SHA256` est épinglé juste sous
+      // `MULTICA_VERSION`, et ce motif lit les deux lignes CONSÉCUTIVES. La datasource
+      // `github-release-attachments` retrouve, dans `checksums.txt` de la release
+      // courante, le fichier dont le hash est `currentDigest`, puis lit la ligne du
+      // MÊME nom dans la nouvelle release : `multica_linux_amd64.tar.gz` doit donc
+      // garder son nom d'une release à l'autre (sinon plus de hash proposé — la PR
+      // ouvre alors sans lui et le build rouge le dit).
+      // ⚠️ La valeur porte son `v` : cette datasource demande la release par TAG
+      // (`v0.6.3`) ; avec `extractVersion` qui le retire, elle interroge `0.6.3` et
+      // le lookup échoue en 404 (mesuré au dry-run du 2026-10-19, Renovate 43 et 44).
+      // ⚠️ Même racine de confiance que `checksums.txt` : ce hash ne protège pas d'une
+      // release recoupée AVANT la PR. Le contrôle est la relecture de la PR (jamais
+      // d'automerge, cf. packageRules) ; le gate `sha256sum -c` du build attrape, lui,
+      // une release recoupée APRÈS. Ne pas retirer l'épingle du hash.
+      description: "ARG MULTICA_VERSION + MULTICA_SHA256 (Dockerfile) — daemon multica, forme `vX.Y.Z`",
       customType: "regex",
       managerFilePatterns: ["/(^|/)Dockerfile$/"],
-      // ⚠️ Ancré comme celui de GH_VERSION plus bas, et pour la même raison mesurée :
-      // un motif non ancré matche une ligne commentée. Défaut de famille, corrigé sur
-      // les deux motifs d'un coup plutôt que sur celui qui a mordu.
-      matchStrings: ["(?m)^\\s*ARG MULTICA_VERSION=(?<currentValue>[^\\s#]+)"],
+      // ⚠️ Ancré, comme celui de GH_VERSION plus bas : un motif non ancré matche une
+      // ligne commentée. Et exige le `v` : c'est ce qui sépare ce motif du motif de
+      // transition ci-dessous, pour qu'une ligne n'en matche jamais deux.
+      matchStrings: [
+        "(?m)^\\s*ARG MULTICA_VERSION=(?<currentValue>v[0-9][^\\s#]*)\\n\\s*ARG MULTICA_SHA256=(?<currentDigest>[a-f0-9]{64})",
+      ],
+      depNameTemplate: "multica-ai/multica",
+      datasourceTemplate: "github-release-attachments",
+      autoReplaceStringTemplate:
+        "ARG MULTICA_VERSION={{{newValue}}}\nARG MULTICA_SHA256={{{newDigest}}}",
+    },
+    {
+      // ⚠️ TRANSITOIRE — À RETIRER dès que `multica-runtime` porte `ARG MULTICA_VERSION=v…`.
+      // Ancienne forme (sans `v`, hash non suivi) : ce motif existe pour que l'ordre de
+      // merge entre ce fichier et le Dockerfile n'ait pas d'importance — sans lui, merger
+      // la config AVANT le Dockerfile éteindrait le suivi de multica en silence (aucun
+      // motif ne matche, aucune erreur, aucune PR : la panne du 2026-08-11). Son départ
+      // ne se constate que par la section `custom.regex` du Dependency Dashboard de
+      // `multica-runtime`, qui doit lister `multica-ai/multica` AVANT comme APRÈS.
+      description: "ARG MULTICA_VERSION (Dockerfile) — ancienne forme sans `v` (transitoire)",
+      customType: "regex",
+      managerFilePatterns: ["/(^|/)Dockerfile$/"],
+      matchStrings: ["(?m)^\\s*ARG MULTICA_VERSION=(?<currentValue>[0-9][^\\s#]*)"],
       depNameTemplate: "multica-ai/multica",
       datasourceTemplate: "github-releases",
       extractVersionTemplate: "^v(?<version>.*)$",
@@ -536,10 +562,12 @@ module.exports = {
       // ⚠️ Pas d'automerge, à dessein, et contrairement aux trois autres familles.
       // Ce que ces épingles gouvernent n'est pas une dépendance applicative
       // ordinaire : le daemon qui EXÉCUTE les tâches de l'agent, la CLI qu'il
-      // fait tourner, et le scanner censé prouver que l'image est saine. Et le
-      // bump de multica part ROUGE par construction (hash non calculable) : un
-      // automerge n'aurait de toute façon jamais lieu, mais mieux vaut que ce
-      // soit une décision qu'un effet de bord.
+      // fait tourner, et le scanner censé prouver que l'image est saine.
+      // ⚠️ CE `false` EST DEVENU LE SEUL GARDE-FOU du bump de multica. Tant que le
+      // hash n'était pas calculable, la PR sortait ROUGE et ne pouvait pas être
+      // automergée de toute façon ; depuis que Renovate propose version ET hash, elle
+      // sort verte, et seule cette ligne empêche un daemon à jeton d'écriture d'être
+      // monté sans qu'un humain ait relu la paire version/hash.
       automerge: false,
     },
     {
