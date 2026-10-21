@@ -2,7 +2,8 @@ name: build-python-slim
 # Base SLIM durcie (non-distroless) pour les apps scientifiques (scipy/scikit-learn)
 # que le distroless DHI ne couvre pas. Construite depuis python:<ver>-slim + libgomp1
 # + non-root uid 65532, Trivy-gatée, poussée en tag mouvant base/python-slim:<ver>
-# (rebuild nocturne pour les patchs slim ; consommateurs épinglent par digest via Renovate),
+# (rebuild nocturne pour les patchs slim, publié SEULEMENT si l'inventaire dpkg, la base ou les sources ont changé ;
+# consommateurs épinglent par digest via Renovate),
 # puis copiée à l'identique (même digest) sur ghcr.io/soma-smart/base/python-slim pour le pod de build des MCP.
 on:
   schedule:
@@ -20,6 +21,9 @@ on:
       - ".github/workflows/build-python-slim.yml"
       # Le verdict Trivy y est partagé : une PR qui le modifie doit rejouer ce gate de bout en bout.
       - "scripts/verdict_trivy.py"
+      # La PR ne joue PAS la décision (steps limités à main) : elle rebuild et scanne. La logique de décision est couverte
+      # par `scripts/test_decision_publication.py` (workflow validate-renovate-config).
+      - "scripts/decision_publication.py"
 concurrency:
   group: build-python-slim
   cancel-in-progress: false
@@ -60,13 +64,24 @@ jobs:
           HARBOR_PASSWORD: ${{ secrets.HARBOR_PASSWORD }}
         run: echo "$HARBOR_PASSWORD" | docker login registry-dev.soma-smart.cloud -u "$HARBOR_USERNAME" --password-stdin
       - name: Build (--pull → dernier python:<ver>-slim pour les patchs)
+        # ⚠️ Le candidat porte un nom LOCAL, jamais celui du registre : le nom du registre est celui de l'image PUBLIÉE,
+        # et la décision de publier la compare au candidat. Les deux sous le même nom, c'est comparer la construction à
+        # elle-même — « inchangé » à vie, job vert, plus aucune publication. Le re-tag n'a lieu que dans le step Push.
+        # Le label porte l'arbre git de `python-slim/` (pas le SHA du commit : un commit étranger au socle ne doit pas
+        # déclencher une publication) : c'est ce qui permet de voir un changement du Dockerfile.
         env:
           VERSION: ${{ matrix.version }}
         run: |
           set -eu
+          # Pull EXPLICITE de la base : BuildKit garde la base du `FROM` dans son cache et ne crée pas toujours le tag local
+          # `python:<ver>-slim`, que la décision relit (couches). Sans ce tag, soit le job rougit chaque nuit, soit un tag
+          # périmé d'un run précédent ferait juger « inchangée » une base qui a bougé (Python vit dans /usr/local,
+          # invisible de dpkg). La décision vérifie en plus que le candidat est bien construit sur ces couches.
+          docker pull --quiet "python:${VERSION}-slim"
           docker build --pull \
             --build-arg PY_VERSION="$VERSION" \
-            -t "registry-dev.soma-smart.cloud/base/python-slim:${VERSION}" \
+            --label "cloud.soma-smart.python-slim.source-tree=$(git rev-parse HEAD:python-slim)" \
+            -t "base-python-slim-candidat:${VERSION}" \
             -f python-slim/Dockerfile python-slim
       - name: Trivy gate (couverture PROUVÉE, puis CVE fixable Critical/High = échec)
         # ⚠️ Le verdict est rendu en Python, PAS par `--exit-code 1`. Un scan qui
@@ -88,7 +103,7 @@ jobs:
           VERSION: ${{ matrix.version }}
         run: |
           set -eu
-          IMAGE="registry-dev.soma-smart.cloud/base/python-slim:${VERSION}"
+          IMAGE="base-python-slim-candidat:${VERSION}"
           trivy image --format json --list-all-pkgs \
             --ignore-unfixed --severity CRITICAL,HIGH \
             "$IMAGE" > trivy.json
@@ -96,31 +111,13 @@ jobs:
           # Verdict commun à tous les socles : `scripts/verdict_trivy.py` (testé par `scripts/test_verdict_trivy.py`).
           python3 scripts/verdict_trivy.py trivy.json "$IMAGE" \
             "vérifier d'abord que le \`dist-upgrade\` du Dockerfile a bien tout appliqué (le correctif Debian peut n'être pas encore publié), puis n'attendre l'amont qu'en dernier recours."
-      - name: Push (idempotent — no-op si digest inchangé)
-        # ⚠️ JAMAIS sur une PR : une PR construit et scanne pour prouver que le socle
-        # tient encore, elle ne publie pas. Publier depuis une branche non mergée
-        # redigesterait le tag mouvant que tous les consommateurs épinglent.
-        # `ref == main` : un `workflow_dispatch` depuis une branche pousserait sinon le tag mouvant que tous les
-        # consommateurs épinglent, SANS copie ghcr (ses steps sont limités à main) — puis pinguerait le succès :
-        # Harbor et ghcr divergeraient en silence et le dead-man's switch serait remis à zéro.
+      - name: Installer crane
+        # ⚠️ Les `if` de crane, décision, push, copie et signal doivent rester ALIGNÉS (signal : `always()` en plus) : un step sauté seul = vert silencieux.
+        # Lecture du digest publié (décision) puis copie ghcr. Version ÉPINGLÉE + SHA-256 vérifié (pas de script `main`
+        # flottant comme pour trivy) : cet outil écrit sur ghcr avec un jeton à droits d'écriture.
+        # ⚠️ Dette : aucun manager Renovate ne voit cette version — à bumper à la main.
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
-          VERSION: ${{ matrix.version }}
-        run: docker push "registry-dev.soma-smart.cloud/base/python-slim:${VERSION}"
-
-      - name: Copier vers ghcr (même digest, lisible en anonyme, sinon échec)
-        # Installation de crane ET copie dans UN seul step : deux steps portant la même condition pouvaient diverger à
-        # l'édition (installation sautée = rouge bruyant ; copie sautée = vert et ping de succès, silencieux).
-        # Version de crane ÉPINGLÉE + SHA-256 vérifié (pas de script `main` flottant comme pour trivy) : cet outil écrit sur
-        # ghcr avec un jeton à droits d'écriture. ⚠️ Dette : aucun manager Renovate ne voit cette version — à bumper à la main.
-        # Le pod de build des MCP (namespace arc-mcp) ne peut PAS joindre Harbor : il tire ses bases d'ici, en anonyme — le
-        # package ghcr doit donc être PUBLIC (geste manuel, cf. README). Copie APRÈS le gate Trivy et le push Harbor, par
-        # digest ; placée AVANT « Signal de vie » : un échec fait pinger `/fail`, la copie est couverte par le dead-man's
-        # switch existant. `ref == main` : une branche ne doit pas publier sur un registre PUBLIC.
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        env:
-          VERSION: ${{ matrix.version }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CRANE_VERSION: v0.22.1
           CRANE_SHA256: 0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0
         run: |
@@ -129,10 +126,78 @@ jobs:
           curl -sfL -o /tmp/crane.tgz "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
           echo "${CRANE_SHA256}  /tmp/crane.tgz" | sha256sum -c -
           tar -xzf /tmp/crane.tgz -C "$HOME/.local/bin" crane
-          export PATH="$HOME/.local/bin:$PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Décider (publier, ou garder l'image déjà publiée)
+        # Le rebuild nocturne ne redonne jamais le même digest (traces apt/dpkg, shadow, cache ldconfig) : sans cette
+        # décision, chaque nuit republie un digest neuf — une PR Renovate par jour chez chaque consommateur, un orphelin
+        # Harbor par build, et l'interblocage repin↔CVE. On ne publie que si l'inventaire dpkg, la base ou les sources
+        # diffèrent de l'image publiée. Logique et cas d'échec : `scripts/decision_publication.py` (testé).
+        # ⚠️ Une lecture impossible (auth, réseau, inventaire vide) fait ÉCHOUER le job — jamais « inchangé » par défaut.
+        # ⚠️ Un changement hors paquets, hors base et hors `python-slim/` (par ex. ce workflow) n'est PAS vu : un
+        # `workflow_dispatch` ne republie pas non plus. Pour forcer une publication, toucher un fichier sous `python-slim/`.
+        id: decide
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          VERSION: ${{ matrix.version }}
+        run: |
+          set -eu
+          python3 scripts/decision_publication.py \
+            "base-python-slim-candidat:${VERSION}" \
+            "registry-dev.soma-smart.cloud/base/python-slim:${VERSION}" \
+            "python:${VERSION}-slim" \
+            "$(git rev-parse HEAD:python-slim)"
+
+      - name: Push (seulement si la décision l'impose)
+        # ⚠️ JAMAIS sur une PR : une PR construit et scanne pour prouver que le socle
+        # tient encore, elle ne publie pas. Publier depuis une branche non mergée
+        # redigesterait le tag mouvant que tous les consommateurs épinglent.
+        # `ref == main` : un `workflow_dispatch` depuis une branche pousserait sinon le tag mouvant que tous les
+        # consommateurs épinglent, SANS copie ghcr (ses steps sont limités à main) — puis pinguerait le succès :
+        # Harbor et ghcr divergeraient en silence et le dead-man's switch serait remis à zéro.
+        # `!= 'false'` et non `== 'true'` : si le step de décision était un jour sauté, on publie (bruyant) plutôt que
+        # de geler la base en silence.
+        id: push
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.decide.outputs.publier != 'false'
+        env:
+          VERSION: ${{ matrix.version }}
+        run: |
+          set -eu
+          REF="registry-dev.soma-smart.cloud/base/python-slim:${VERSION}"
+          docker tag "base-python-slim-candidat:${VERSION}" "$REF"
+          docker push "$REF"
+          # ⚠️ Capturer AVANT `echo` : `echo "$(cmd)"` masque l'échec de cmd, le digest sortirait vide et la copie
+          # retomberait sur le digest d'AVANT le push (ghcr garderait l'ancienne image, job vert, ping de succès).
+          d=$(crane digest "$REF")
+          case "$d" in
+            sha256:????????????????????????????????????????????????????????????????) ;;
+            *) echo "ERREUR: digest illisible après push : '$d'" >&2; exit 1 ;;
+          esac
+          echo "digest=$d" >> "$GITHUB_OUTPUT"
+
+      - name: Copier vers ghcr (même digest, lisible en anonyme, sinon échec)
+        # Le pod de build des MCP (namespace arc-mcp) ne peut PAS joindre Harbor : il tire ses bases d'ici, en anonyme — le
+        # package ghcr doit donc être PUBLIC (geste manuel, cf. README). Copie APRÈS le gate Trivy et la décision de
+        # publier ; placée AVANT « Signal de vie » : un échec fait pinger `/fail`, la copie est couverte par le dead-man's
+        # switch existant. `ref == main` : une branche ne doit pas publier sur un registre PUBLIC.
+        # ⚠️ La copie tourne AUSSI quand la publication est sautée, et ce n'est pas du zèle : elle relit ghcr en anonyme à
+        # chaque exécution (un package peut redevenir privé), et si la copie d'une nuit précédente a échoué après un push
+        # Harbor réussi, la sauter figerait la divergence Harbor/ghcr derrière un job vert. Source ÉPINGLÉE au digest
+        # courant (poussé cette nuit, ou déjà publié) : même digest = aucun objet neuf sur ghcr.
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          VERSION: ${{ matrix.version }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DIGEST: ${{ steps.push.outputs.digest || steps.decide.outputs.digest }}
+        run: |
+          set -eu
+          if [ -z "$DIGEST" ]; then
+            echo "ERREUR: aucun digest Harbor à copier (ni poussé, ni publié) — la décision n'a pas rendu de digest." >&2
+            exit 1
+          fi
           echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           python3 scripts/copie_ghcr.py \
-            "registry-dev.soma-smart.cloud/base/python-slim:${VERSION}" \
+            "registry-dev.soma-smart.cloud/base/python-slim@${DIGEST}" \
             "ghcr.io/soma-smart/base/python-slim:${VERSION}"
 
       - name: Signal de vie (dead-man's switch)
@@ -163,6 +228,11 @@ jobs:
         env:
           HC_URL: ${{ secrets.HEALTHCHECKS_URL_BUILD_PYTHON_SLIM }}
           RESULTAT: ${{ job.status }}
+          # Le corps du ping distingue une publication d'un saut volontaire (Healthchecks le garde dans son journal).
+          # Un saut n'est jamais signalé par un ping « vide » : il ne se confond pas avec un build qui n'a rien fait.
+          DECISION: ${{ steps.decide.outputs.publier }}
+          RAISON: ${{ steps.decide.outputs.raison }}
+          DIGEST: ${{ steps.push.outputs.digest || steps.decide.outputs.digest }}
         run: |
           set -eu
           if [ -z "${HC_URL:-}" ]; then
@@ -176,7 +246,12 @@ jobs:
             exit 0
           fi
           if [ "$RESULTAT" = "success" ]; then
-            curl -fsS -m 10 --retry 3 "$HC_URL" > /dev/null
+            if [ "$DECISION" = "false" ]; then
+              CORPS="sauté — ${RAISON} (publié : ${DIGEST})"
+            else
+              CORPS="publié ${DIGEST:-sans digest} — ${RAISON:-décision absente}"
+            fi
+            curl -fsS -m 10 --retry 3 --data-raw "$CORPS" "$HC_URL" > /dev/null
           else
             curl -fsS -m 10 --retry 3 "$HC_URL/fail" > /dev/null
           fi

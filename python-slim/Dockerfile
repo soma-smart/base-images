@@ -8,7 +8,8 @@
 # souvent, on le fournit en filet de sécurité), UTF-8 forcé, pas de cache apt.
 #
 # Tag `base/python-slim:<ver>` VOLONTAIREMENT mouvant : rebuild nocturne depuis le
-# dernier `python:<ver>-slim` (patchs Debian) → redigesté. Les consommateurs épinglent
+# dernier `python:<ver>-slim` (patchs Debian), REPUBLIÉ seulement si le contenu a changé
+# (cf. README, « Publication conditionnelle »). Les consommateurs épinglent
 # par digest via Renovate (comme base/python). Trivy-gaté au build.
 ARG PY_VERSION=3.14
 FROM python:${PY_VERSION}-slim
@@ -42,7 +43,7 @@ LABEL org.opencontainers.image.source="https://github.com/soma-smart/base-images
 # comme CVE — jamais un correctif simplement pas appliqué.
 #
 # ⚠️ Ceci rend le build NON REPRODUCTIBLE — assumé, et déjà vrai : le tag est mouvant
-# par construction (rebuild nocturne, `--pull` sur un `FROM` non épinglé, cf. en-tête).
+# par construction (rebuild nocturne, republié sur changement de contenu, `--pull` sur un `FROM` non épinglé, cf. en-tête).
 # L'immutabilité ne vit pas ici, elle vit chez le consommateur, dans son digest-pin.
 RUN apt-get update \
  && apt-get -y --no-install-recommends dist-upgrade \
