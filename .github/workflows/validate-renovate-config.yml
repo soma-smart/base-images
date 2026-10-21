@@ -101,6 +101,9 @@ jobs:
       - name: Contre-tests du verdict Trivy
         run: python3 scripts/test_verdict_trivy.py
 
+      - name: Contre-tests de la décision de publication
+        run: python3 scripts/test_decision_publication.py
+
       - name: Manager et motifs doivent rester appariés
         # Ce que le validateur NE dit PAS : `custom.regex` activé sans
         # `customManagers`, ou l'inverse, est parfaitement VALIDE et totalement
