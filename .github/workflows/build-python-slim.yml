@@ -21,6 +21,8 @@ on:
       - ".github/workflows/build-python-slim.yml"
       # Le verdict Trivy y est partagé : une PR qui le modifie doit rejouer ce gate de bout en bout.
       - "scripts/verdict_trivy.py"
+      # La PR ne joue PAS la décision (steps limités à main) : elle rebuild et scanne. La logique de décision est couverte
+      # par `scripts/test_decision_publication.py` (workflow validate-renovate-config).
       - "scripts/decision_publication.py"
 concurrency:
   group: build-python-slim
@@ -71,6 +73,11 @@ jobs:
           VERSION: ${{ matrix.version }}
         run: |
           set -eu
+          # Pull EXPLICITE de la base : BuildKit garde la base du `FROM` dans son cache et ne crée pas toujours le tag local
+          # `python:<ver>-slim`, que la décision relit (couches). Sans ce tag, soit le job rougit chaque nuit, soit un tag
+          # périmé d'un run précédent ferait juger « inchangée » une base qui a bougé (Python vit dans /usr/local,
+          # invisible de dpkg). La décision vérifie en plus que le candidat est bien construit sur ces couches.
+          docker pull --quiet "python:${VERSION}-slim"
           docker build --pull \
             --build-arg PY_VERSION="$VERSION" \
             --label "cloud.soma-smart.python-slim.source-tree=$(git rev-parse HEAD:python-slim)" \
@@ -105,6 +112,7 @@ jobs:
           python3 scripts/verdict_trivy.py trivy.json "$IMAGE" \
             "vérifier d'abord que le \`dist-upgrade\` du Dockerfile a bien tout appliqué (le correctif Debian peut n'être pas encore publié), puis n'attendre l'amont qu'en dernier recours."
       - name: Installer crane
+        # ⚠️ Les `if` de crane, décision, push, copie et signal doivent rester ALIGNÉS (signal : `always()` en plus) : un step sauté seul = vert silencieux.
         # Lecture du digest publié (décision) puis copie ghcr. Version ÉPINGLÉE + SHA-256 vérifié (pas de script `main`
         # flottant comme pour trivy) : cet outil écrit sur ghcr avec un jeton à droits d'écriture.
         # ⚠️ Dette : aucun manager Renovate ne voit cette version — à bumper à la main.
@@ -127,7 +135,7 @@ jobs:
         # diffèrent de l'image publiée. Logique et cas d'échec : `scripts/decision_publication.py` (testé).
         # ⚠️ Une lecture impossible (auth, réseau, inventaire vide) fait ÉCHOUER le job — jamais « inchangé » par défaut.
         # ⚠️ Un changement hors paquets, hors base et hors `python-slim/` (par ex. ce workflow) n'est PAS vu : un
-        # `workflow_dispatch` ne republie pas non plus. Pour forcer une publication, toucher `python-slim/Dockerfile`.
+        # `workflow_dispatch` ne republie pas non plus. Pour forcer une publication, toucher un fichier sous `python-slim/`.
         id: decide
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
@@ -158,7 +166,14 @@ jobs:
           REF="registry-dev.soma-smart.cloud/base/python-slim:${VERSION}"
           docker tag "base-python-slim-candidat:${VERSION}" "$REF"
           docker push "$REF"
-          echo "digest=$(crane digest "$REF")" >> "$GITHUB_OUTPUT"
+          # ⚠️ Capturer AVANT `echo` : `echo "$(cmd)"` masque l'échec de cmd, le digest sortirait vide et la copie
+          # retomberait sur le digest d'AVANT le push (ghcr garderait l'ancienne image, job vert, ping de succès).
+          d=$(crane digest "$REF")
+          case "$d" in
+            sha256:????????????????????????????????????????????????????????????????) ;;
+            *) echo "ERREUR: digest illisible après push : '$d'" >&2; exit 1 ;;
+          esac
+          echo "digest=$d" >> "$GITHUB_OUTPUT"
 
       - name: Copier vers ghcr (même digest, lisible en anonyme, sinon échec)
         # Le pod de build des MCP (namespace arc-mcp) ne peut PAS joindre Harbor : il tire ses bases d'ici, en anonyme — le

@@ -30,6 +30,7 @@ import sys
 DELAI_S = 600
 LABEL_SOURCES = "cloud.soma-smart.python-slim.source-tree"
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}\Z")
+ARBRE = re.compile(r"^[0-9a-f]{40}\Z")
 ABSENT = ("MANIFEST_UNKNOWN", "NAME_UNKNOWN")
 
 
@@ -103,15 +104,22 @@ def decider(run, candidat, ref, base, arbre):
         diff = sorted(set(inv_nouveau) ^ set(inv_publie))
         return True, f"inventaire dpkg différent ({len(diff)} lignes, ex. {diff[0].split(chr(9))[0]})", digest
     base_c, publiee_c = couches(run, base), couches(run, publiee)
+    # La base lue doit être CELLE du candidat : un tag mouvant relu après coup (ou un tag local périmé) ferait comparer
+    # le publié à une base que le candidat ne contient pas — et un vrai changement de base passerait pour « inchangé ».
+    if couches(run, candidat)[:len(base_c)] != base_c:
+        raise DecisionError(f"le candidat n'est pas construit sur les couches lues de {base} (tag déplacé entre le build et la décision, ou tag local périmé)")
     if publiee_c[:len(base_c)] != base_c:
         return True, "la base python:<ver>-slim a changé (couches)", digest
     pub = label_sources(run, publiee)
-    if pub != arbre:
-        return True, f"sources du socle différentes (label publié : {pub or 'absent'})", digest
+    # Le label vient d'un objet mutable : une valeur qui n'a pas la forme d'un arbre git est traitée comme ABSENTE
+    # (publier), et n'est jamais recopiée dans les sorties.
+    if not (isinstance(pub, str) and ARBRE.match(pub)) or pub != arbre:
+        return True, "sources du socle différentes ou label absent/illisible", digest
     return False, "inventaire, base et sources inchangés", digest
 
 
 def ecrire(sortie, publier, raison, digest):
+    raison = " ".join(raison.split())[:200]  # une valeur lue d'un registre ne doit pas pouvoir ajouter de lignes à $GITHUB_OUTPUT
     ligne = f"publier={'true' if publier else 'false'}\nraison={raison}\ndigest={digest or ''}\n"
     print(ligne, end="")
     if sortie:
