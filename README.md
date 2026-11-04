@@ -51,6 +51,13 @@ python:<ver>-slim  ──(build nocturne, publié si le contenu change + libgomp
 - **Gestes manuels** : package ghcr **public** (irréversible) — le premier run est rouge par construction ; secret `HEALTHCHECKS_URL_COPIE_ALPINE` (sinon dead-man's switch inerte, signalé en avertissement).
 - ⚠️ **Aucun Renovate ne suit cette chaîne aujourd'hui** : constaté le 2026-10-19, Renovate autodécouvre 8 dépôts, ni `base-images` ni `mcp-servers` n'en font partie. Ni `alpine/Dockerfile`, ni l'épingle du consommateur (`container: image: ghcr.io/soma-smart/base/alpine:<X.Y.Z>@sha256:…`) ne reçoivent de PR. L'alarme est le cron de `copie-alpine` (rouge à la première CVE corrigeable ou à la fin de support) ; au bump, vérifier à la main qu'une version a ≥ 3 jours. Étendre le périmètre de `soma-base-bumper` applique TOUTE la politique de `renovate-config.js` à ces dépôts : décision de Gautier. Une datasource `docker` sur ghcr n'a de toute façon pas d'horodatage.
 
+## Version de Trivy — `.trivy-version`
+
+Un seul fichier, **`.trivy-version`** (`X.Y.Z`), lu par `scripts/install_trivy.sh`, lui-même appelé par `build-python-slim`, `copie-alpine` et `mirror-dhi`. Le script télécharge l'archive de la release GitHub **avec reprise sur toute erreur** (`--retry-all-errors` : un `--retry` seul ne rejoue ni un DNS en échec ni une connexion refusée, et c'est une panne DNS passagère qui a fait tomber le build du 2026-11-04) et vérifie le SHA-256 contre le fichier de sommes de la même release — protège d'une archive tronquée, **pas** d'une release compromise. Testé par `scripts/test_install_trivy.py` (chemin nominal et modes d'échec).
+- ⚠️ **Renovate ne suit PAS ce fichier** : ce dépôt n'est pas autodécouvert (cf. ci-dessus), et le motif `TRIVY_VERSION` de `renovate-config.js` est écrit pour d'autres dépôts. Sans suivi, la version gèle en silence.
+- **Mise à jour à la main** : éditer `.trivy-version` (release stable publiée depuis ≥ 3 jours) et ouvrir la PR. `build-python-slim` et `copie-alpine` rejouent alors l'installation ET le scan sur PR (`.trivy-version` est dans leurs `paths`). ⚠️ `mirror-dhi` ne tourne pas sur PR : sa preuve est son run de 02:00 UTC.
+- **Pourquoi un fichier et pas un `env:` de workflow** : le `GITHUB_TOKEN` d'un workflow ne peut jamais modifier un fichier sous `.github/workflows/`. Un bot de mise à jour aurait exigé un PAT à droit `workflow` — capable de réécrire n'importe quel workflow d'un dépôt dont les runners portent les identifiants Harbor.
+
 ## Workflow
 
 `.github/workflows/mirror-dhi.yml` — matrix par version : pull DHI → retag → gate Trivy → push Harbor. Idempotent (un digest inchangé = no-op).

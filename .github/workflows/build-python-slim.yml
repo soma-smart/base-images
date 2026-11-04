@@ -24,6 +24,9 @@ on:
       # La PR ne joue PAS la décision (steps limités à main) : elle rebuild et scanne. La logique de décision est couverte
       # par `scripts/test_decision_publication.py` (workflow validate-renovate-config).
       - "scripts/decision_publication.py"
+      # La version de Trivy et son installation : une PR qui les change doit rejouer l'installation ET le scan de bout en bout.
+      - ".trivy-version"
+      - "scripts/install_trivy.sh"
 concurrency:
   group: build-python-slim
   cancel-in-progress: false
@@ -44,28 +47,10 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Install trivy
         # Runner ARC non-root → installe dans un répertoire writable + PATH.
-        # Version ÉPINGLÉE : plus de `install.sh` pris sur la branche `main` (une release amont cassée ou une nouvelle
-        # version non mûre entrait dans le gate CVE sans revue). Le motif `TRIVY_VERSION` de `renovate-config.js` lit la
-        # ligne ci-dessous : ne pas la déplacer hors d'un `env:` de workflow, ni la commenter, sans quoi elle gèle en silence.
-        # ⚠️ Le téléchargement est fait ICI, pas par `install.sh` : la panne du 2026-11-04 (`exit code 6`, résolution DNS)
-        # venait du téléchargement du binaire exécuté PAR le script, hors de portée d'un retry posé sur le `curl` qui
-        # récupère le script. Et `--retry` seul ne rejoue PAS un échec de résolution : il faut `--retry-all-errors`.
-        # Le SHA-256 est vérifié contre le fichier de sommes de la même release (même contrôle que `install.sh`).
-        env:
-          TRIVY_VERSION: "0.76.1"
-        run: |
-          set -eu
-          mkdir -p "$HOME/.local/bin"
-          base="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
-          archive="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
-          dir="$(mktemp -d)"
-          curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -o "$dir/$archive" "$base/$archive"
-          curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -o "$dir/checksums.txt" "$base/trivy_${TRIVY_VERSION}_checksums.txt"
-          (cd "$dir" && grep -F " $archive" checksums.txt | sha256sum -c -)
-          tar -xzf "$dir/$archive" -C "$HOME/.local/bin" trivy
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          # `GITHUB_PATH` ne vaut qu'à partir du step SUIVANT : appeler le binaire par son chemin.
-          "$HOME/.local/bin/trivy" --version
+        # La version est celle de `.trivy-version` (UNE source pour les trois workflows) ; le téléchargement, la reprise sur
+        # échec réseau et la vérification SHA-256 sont dans `scripts/install_trivy.sh` (testé : `test_install_trivy.py`).
+        # Mise à jour : à la main, en éditant `.trivy-version` (README, « Version de Trivy ») — Renovate ne suit pas ce fichier.
+        run: bash scripts/install_trivy.sh
       - name: Login Docker Hub (pull python:<ver>-slim — évite le rate-limit anonyme)
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
