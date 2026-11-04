@@ -132,6 +132,8 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          # `--retry-all-errors --retry-delay 5` ne sont PAS des doublons de `--retry 3` (même raison que build-python-slim) :
+          # sans eux, un ping perdu sur une coupure de quelques secondes fait tomber le check sans que la copie soit en cause.
           if [ "$RESULTAT" = "success" ]; then
             curl -fsS -m 10 --retry 3 --retry-all-errors --retry-delay 5 "$HC_URL" > /dev/null
           else

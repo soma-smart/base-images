@@ -264,6 +264,9 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          # `--retry-all-errors --retry-delay 5` ne sont PAS des doublons de `--retry 3` : celui-ci ne rejoue ni un échec DNS ni
+          # une connexion refusée, et un ping perdu sur une coupure de quelques secondes fait tomber le check sans que le build
+          # soit en cause. `-m 10` vaut PAR tentative (pire cas ≈ 55 s au total).
           if [ "$RESULTAT" = "success" ]; then
             if [ "$DECISION" = "false" ]; then
               CORPS="sauté — ${RAISON} (publié : ${DIGEST})"
