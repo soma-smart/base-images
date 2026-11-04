@@ -222,10 +222,13 @@ module.exports = {
       // l'IP, pas sur le jeton. Mesuré — la même requête ANONYME, depuis la même IP,
       // rend 200. Ne pas « réparer » ce motif en lui ajoutant un jeton.
       //
-      // ⚠️ On suit désormais L'ARTEFACT RÉELLEMENT CONSOMMÉ : le workflow de build tire
-      // `dockerhub-proxy/aquasec/trivy:${TRIVY_VERSION}`. Surveiller autre chose que ce
-      // qu'on exécute rouvrirait un écart entre l'index et la réalité — et ça supprime
+      // ⚠️ On suit la VERSION par le tag de l'image `aquasec/trivy`, qui porte le même
+      // numéro que la release GitHub (publié à quelques minutes d'écart) — et ça supprime
       // toute dépendance à la politique IP d'un tiers, qui peut rechanger sans préavis.
+      // ⚠️ Ce n'est PAS l'artefact exécuté : `build-python-slim.yml` télécharge l'archive
+      // de la release GitHub (`trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz`) et vérifie sa
+      // somme. Si le tag Docker et la release divergent un jour (tag publié sans release,
+      // ou l'inverse), le bump échoue au téléchargement — ROUGE, donc visible.
       //
       // ⚠️ Deux mesures ont décidé, à ne pas re-supposer :
       //   - le proxy Harbor expose la liste COMPLÈTE des tags amont (0.1.6 → 0.74.0),
