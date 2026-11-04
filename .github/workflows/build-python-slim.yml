@@ -49,7 +49,7 @@ jobs:
         # Runner ARC non-root → installe dans un répertoire writable + PATH.
         # La version est celle de `.trivy-version` (UNE source pour les trois workflows) ; le téléchargement, la reprise sur
         # échec réseau et la vérification SHA-256 sont dans `scripts/install_trivy.sh` (testé : `test_install_trivy.py`).
-        # Mise à jour : la PR ouverte par `bump-trivy.yml`, ou à la main en éditant `.trivy-version`.
+        # Mise à jour : à la main, en éditant `.trivy-version` (README, « Version de Trivy ») — Renovate ne suit pas ce fichier.
         run: bash scripts/install_trivy.sh
       - name: Login Docker Hub (pull python:<ver>-slim — évite le rate-limit anonyme)
         env:

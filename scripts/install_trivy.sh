@@ -7,8 +7,8 @@
 # ⚠️ POURQUOI UN SCRIPT, ET POURQUOI UN FICHIER DE VERSION HORS DES WORKFLOWS.
 #   - Trois blocs recopiés dans trois workflows : un bump devait les garder alignés à la main.
 #   - La version vit dans `.trivy-version`, PAS dans un `env:` de workflow : le `GITHUB_TOKEN` d'un workflow ne
-#     peut jamais modifier un fichier sous `.github/workflows/`. Le workflow `bump-trivy.yml` n'aurait donc pas pu
-#     ouvrir sa PR sans un PAT à droit `workflow` — un secret capable de réécrire n'importe quel workflow de ce
+#     peut jamais modifier un fichier sous `.github/workflows/`. Un workflow de mise à jour automatique n'aurait donc
+#     pas pu ouvrir sa PR sans un PAT à droit `workflow` — un secret capable de réécrire n'importe quel workflow de ce
 #     dépôt, qui tourne sur des runners portant les identifiants Harbor.
 #
 # ⚠️ POURQUOI `--retry-all-errors`. Un `--retry` seul ne rejoue que les erreurs « transitoires » (timeout, HTTP 408,
@@ -20,7 +20,10 @@
 set -euo pipefail
 
 racine="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-version="$(tr -d '[:space:]' < "$racine/.trivy-version")"
+fichier="$racine/.trivy-version"
+# UNE ligne non vide : `tr -d '[:space:]'` colle les lignes (`0.76.1⏎0` deviendrait `0.76.10`, qui passerait la regex).
+[ "$(grep -c . "$fichier")" -eq 1 ] || { echo "ERREUR: .trivy-version doit contenir UNE ligne X.Y.Z" >&2; exit 1; }
+version="$(tr -d '[:space:]' < "$fichier")"
 
 # La valeur finit dans une URL : on n'accepte que X.Y.Z (ni `v` initial, ni suffixe, ni vide).
 if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -37,8 +40,11 @@ trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$dest"
 curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -o "$tmp/$archive" "$base/$archive"
 curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -o "$tmp/checksums.txt" "$base/trivy_${version}_checksums.txt"
-# `pipefail` : une ligne de somme ABSENTE (grep sans résultat) fait échouer le step, elle ne passe pas pour « vérifié ».
-(cd "$tmp" && grep -F " $archive" checksums.txt | sha256sum -c -)
+# La ligne de somme est extraite et contrôlée EXPLICITEMENT, sans compter sur le comportement de `sha256sum` face à une entrée
+# vide (GNU la refuse, BusyBox l'accepte) : une somme absente, ou ambiguë, ne doit jamais passer pour « vérifiée ».
+ligne="$(grep -F " $archive" "$tmp/checksums.txt")" || { echo "ERREUR: aucune somme pour $archive dans checksums.txt" >&2; exit 1; }
+[ "$(printf '%s\n' "$ligne" | wc -l)" -eq 1 ] || { echo "ERREUR: plusieurs sommes pour $archive dans checksums.txt" >&2; exit 1; }
+(cd "$tmp" && printf '%s\n' "$ligne" | sha256sum -c -)
 tar -xzf "$tmp/$archive" -C "$dest" trivy
 
 # `GITHUB_PATH` ne vaut qu'à partir du step SUIVANT : on appelle le binaire par son chemin pour l'afficher ici.

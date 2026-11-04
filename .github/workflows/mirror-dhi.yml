@@ -15,12 +15,15 @@ concurrency:
 jobs:
   mirror:
     runs-on: onprem-dev-base-images
+    # Le checkout n'a besoin que de lire le dépôt : indépendant du réglage par défaut des permissions du dépôt.
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
         version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      # Nouveau : le script d'installation et `.trivy-version` vivent dans le dépôt, ce workflow n'en lisait aucun fichier.
+      # Checkout requis : le script d'installation et `.trivy-version` vivent dans le dépôt (ce workflow n'en lit aucun autre fichier).
       # ⚠️ Ce workflow ne tourne PAS sur PR (schedule + dispatch seulement) : ce checkout et l'appel du script ne sont jamais
       # joués avant le merge. Le script est couvert par `test_install_trivy.py` et joué par build-python-slim/copie-alpine ;
       # la première preuve de CE workflow est son run de 02:00 UTC suivant le merge.

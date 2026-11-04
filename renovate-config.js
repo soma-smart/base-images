@@ -207,8 +207,8 @@ module.exports = {
         "https://downloads.claude.ai/claude-code/apt/stable?suite=stable&components=main&binaryArch=amd64",
     },
     {
-      // La version de Trivy vit dans un bloc `env:` de workflow, invisible au
-      // manager `github-actions` (qui ne lit que les `uses:`). Sans ce motif, le
+      // Dans un dépôt CONSOMMATEUR, la version de Trivy vit dans un bloc `env:` de workflow,
+      // invisible au manager `github-actions` (qui ne lit que les `uses:`). Sans ce motif, le
       // scanner gèle et cesse de détecter les CVE récentes — un gate qui rend
       // vert sans plus rien prouver.
       //
@@ -222,8 +222,8 @@ module.exports = {
       // l'IP, pas sur le jeton. Mesuré — la même requête ANONYME, depuis la même IP,
       // rend 200. Ne pas « réparer » ce motif en lui ajoutant un jeton.
       //
-      // ⚠️ On suit désormais L'ARTEFACT RÉELLEMENT CONSOMMÉ : le workflow de build tire
-      // `dockerhub-proxy/aquasec/trivy:${TRIVY_VERSION}`. Surveiller autre chose que ce
+      // ⚠️ On suit désormais L'ARTEFACT RÉELLEMENT CONSOMMÉ par ce workflow consommateur : il
+      // tire `dockerhub-proxy/aquasec/trivy:${TRIVY_VERSION}`. Surveiller autre chose que ce
       // qu'on exécute rouvrirait un écart entre l'index et la réalité — et ça supprime
       // toute dépendance à la politique IP d'un tiers, qui peut rechanger sans préavis.
       //
@@ -232,8 +232,8 @@ module.exports = {
       // `agent-infogerance` et un plan de doc) : ce motif n'a plus de cible connue. `base-images`
       // n'en est PAS une : il épingle Trivy dans `.trivy-version` (archive de la release GitHub, pas
       // une image), un fichier que ce motif ne lit pas — et ce dépôt n'est de toute façon pas
-      // autodécouvert par Renovate (README, « Aucun Renovate ne suit… »). Son suivi : README, « Mise à
-      // jour de Trivy ». Ne pas relire ce motif comme couvrant `base-images`.
+      // autodécouvert par Renovate (README, « Aucun Renovate ne suit… »). Son suivi : README, section
+      // « Version de Trivy — `.trivy-version` ». Ne pas relire ce motif comme couvrant `base-images`.
       //
       // ⚠️ Deux mesures ont décidé, à ne pas re-supposer :
       //   - le proxy Harbor expose la liste COMPLÈTE des tags amont (0.1.6 → 0.74.0),
