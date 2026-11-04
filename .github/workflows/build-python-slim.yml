@@ -64,7 +64,8 @@ jobs:
           (cd "$dir" && grep -F " $archive" checksums.txt | sha256sum -c -)
           tar -xzf "$dir/$archive" -C "$HOME/.local/bin" trivy
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          trivy --version
+          # `GITHUB_PATH` ne vaut qu'à partir du step SUIVANT : appeler le binaire par son chemin.
+          "$HOME/.local/bin/trivy" --version
       - name: Login Docker Hub (pull python:<ver>-slim — évite le rate-limit anonyme)
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
