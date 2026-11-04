@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Exerce `bump_trivy.py` dans ses modes d'ECHEC : chaque cas est un chemin par lequel le script conclurait « à jour » (ou
 ouvrirait la mauvaise PR) sans rien avoir prouvé. Aucun accès réseau : l'API, git et l'horloge sont injectés."""
+import http.client
 import io
 import json
 import os
 import sys
 import tempfile
 import urllib.error
-from contextlib import redirect_stdout
+from contextlib import contextmanager, redirect_stdout
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -89,6 +90,12 @@ def test_jamais_de_retour_en_arriere():
         assert cible is None and "à jour" in raison, (actuelle, cible, raison)
 
 
+def test_chiffres_unicode_refuses():
+    erreur("version en chiffres arabes", lambda: b.version_tuple("٣.٤.٥"), "version invalide")
+    cible, _ = b.choisir([rel("v٣.٤.٥", 10), rel("v0.76.1", 30)], courante("0.76.1"), MAINTENANT)
+    assert cible is None, "un tag en chiffres Unicode ne doit jamais être proposé"
+
+
 def test_comparaison_numerique_pas_lexicale():
     cible, _ = b.choisir([rel("v0.9.0", 40), rel("v0.10.0", 30)], courante("0.9.0"), MAINTENANT)
     assert cible and cible["version"] == "0.10.0", cible
@@ -141,8 +148,26 @@ def test_requete_anonyme_sans_en_tete_authorization():
         return Reponse([rel("v0.76.1", 30)])
     b.releases_anonymes(ouvrir=ouvrir, dormir=lambda s: None)
     assert len(vues) == 1 and vues[0].full_url == b.URL_RELEASES
-    en_tetes = {k.lower() for k in vues[0].headers}
-    assert "authorization" not in en_tetes, "la requête à l'API de Trivy ne doit JAMAIS porter de jeton (IP allow list)"
+    tous = {k.lower() for k in vues[0].headers} | {k.lower() for k in vues[0].unredirected_hdrs}
+    assert "authorization" not in tous, "la requête à l'API de Trivy ne doit JAMAIS porter de jeton (IP allow list)"
+    assert not any(k.lower() == "authorization" for k, _ in vues[0].header_items())
+
+
+def test_main_lit_les_releases_par_la_voie_anonyme():
+    """Tous les autres tests de main() injectent `releases=` : sans celui-ci, rien ne prouvait que main() n'allait pas lire
+    l'API de Trivy par la classe `Github` (qui, elle, porte le jeton)."""
+    appels = []
+    ancien = b.releases_anonymes
+    b.releases_anonymes = lambda: appels.append("anonyme") or [rel("v0.76.1", 30)]
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / ".trivy-version"
+            f.write_text("0.76.1\n")
+            with redirect_stdout(io.StringIO()):
+                b.main([], fichier=f, maintenant=MAINTENANT)
+    finally:
+        b.releases_anonymes = ancien
+    assert appels == ["anonyme"], appels
 
 
 def test_reprises_et_abandon():
@@ -175,6 +200,28 @@ def test_reprises_et_abandon():
     assert len(appels) == 1
 
 
+def test_erreurs_pendant_la_lecture_de_la_reponse_sont_rejouees():
+    class LectureCassee(Reponse):
+        def __init__(self, erreur):
+            self.erreur = erreur
+
+        def read(self):
+            raise self.erreur
+
+    for erreur_lecture in (ConnectionResetError("reset"), http.client.IncompleteRead(b"x"),
+                           UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalide"), TimeoutError("lent")):
+        appels = []
+
+        def ouvrir(req, timeout, e=erreur_lecture):
+            appels.append(1)
+            return LectureCassee(e) if len(appels) == 1 else Reponse([rel("v0.76.1", 30)])
+        assert b.releases_anonymes(ouvrir=ouvrir, dormir=lambda s: None) and len(appels) == 2, type(erreur_lecture).__name__
+    # et si elle ne se rétablit jamais : rouge, avec le message de BumpError (pas un traceback brut)
+    erreur("lecture cassée en permanence",
+           lambda: b.releases_anonymes(ouvrir=lambda req, timeout: LectureCassee(ConnectionResetError("reset")), dormir=lambda s: None),
+           "après 3 essais")
+
+
 # ---------------------------------------------------------------- API de NOTRE dépôt
 def test_api_depot_porte_le_jeton_et_explique_le_refus_de_creer_une_pr():
     vues = []
@@ -192,6 +239,17 @@ def test_api_depot_porte_le_jeton_et_explique_le_refus_de_creer_une_pr():
     erreur("création de PR refusée", lambda: b.Github("o/r", "J", ouvrir=refuse)("POST", "/pulls", {}),
            "Allow GitHub Actions to create and approve pull requests")
     erreur("autre refus", lambda: b.Github("o/r", "J", ouvrir=refuse)("GET", "/pulls"), "HTTP 403")
+    # réseau / délai / réponse illisible : une erreur lisible (`::error::`), pas un traceback
+    for e in (urllib.error.URLError("dns"), TimeoutError("lent"), http.client.IncompleteRead(b"x"), ConnectionResetError("reset")):
+        def casse(req, timeout, e=e):
+            raise e
+        erreur(type(e).__name__, lambda: b.Github("o/r", "J", ouvrir=casse)("GET", "/pulls"), type(e).__name__)
+    erreur("corps non JSON", lambda: b.Github("o/r", "J", ouvrir=lambda req, timeout: Reponse(b"<html>"))("GET", "/pulls"),
+           "JSONDecodeError")
+    # un 5xx garde son code HTTP dans le message (l'ordre des `except` : HTTPError avant sa classe mère URLError)
+    def http500(req, timeout):
+        raise urllib.error.HTTPError(req.full_url, 500, "x", {}, io.BytesIO(b"boom"))
+    erreur("HTTP 500", lambda: b.Github("o/r", "J", ouvrir=http500)("GET", "/pulls"), "HTTP 500 boom")
 
 
 # ---------------------------------------------------------------- ouverture de la PR
@@ -199,18 +257,25 @@ CIBLE = {"version": "0.77.0", "publiee": "2026-11-01T10:00:00Z", "url": "https:/
 
 
 def faux(pulls_existantes=None, ls_remote=2, echec_sur=None):
-    appels = {"api": [], "git": []}
+    """API et git simulés. `ordre` : la suite EXACTE des appels (git et API mêlés), pour verrouiller l'ordre des étapes."""
+    appels = {"api": [], "git": [], "ordre": []}
 
     def api(methode, chemin, corps=None):
         appels["api"].append((methode, chemin, corps))
+        appels["ordre"].append(f"{methode} {chemin}")
         if echec_sur and methode == "POST" and chemin == echec_sur:
             raise b.BumpError(f"{chemin} refusé")
         return pulls_existantes if methode == "GET" else None
 
     def executer_git(args, tolerer=(0,)):
         appels["git"].append(args)
+        appels["ordre"].append("git " + next(a for a in args if a in ("ls-remote", "switch", "add", "commit", "push")))
         return ls_remote if args[0] == "ls-remote" else 0
     return api, executer_git, appels
+
+
+DISPATCH_BUILD = "POST /actions/workflows/build-python-slim.yml/dispatches"
+DISPATCH_COPIE = "POST /actions/workflows/copie-alpine.yml/dispatches"
 
 
 def test_pr_fraiche_pousse_ouvre_et_lance_la_ci():
@@ -226,6 +291,53 @@ def test_pr_fraiche_pousse_ouvre_et_lance_la_ci():
     lances = [a[1] for a in appels["api"] if "/dispatches" in a[1]]
     assert lances == [f"/actions/workflows/{w}/dispatches" for w in b.WORKFLOWS_CI], lances
     assert all(a[2] == {"ref": "bump/trivy-0.77.0"} for a in appels["api"] if "/dispatches" in a[1])
+    # L'ORDRE est la garantie : branche poussée → CI lancée → PR créée (jamais la PR avant la CI, cf. test suivant)
+    ordre = appels["ordre"]
+    assert ordre.index("git push") < ordre.index(DISPATCH_BUILD) < ordre.index(DISPATCH_COPIE) < ordre.index("POST /pulls"), ordre
+
+
+def test_echec_du_lancement_laisse_une_branche_sans_pr_et_le_run_suivant_reprend():
+    """Si la PR était créée AVANT la CI, un lancement raté la laisserait sans aucun check, et le run suivant sortirait vert."""
+    api, g, appels = faux(pulls_existantes=[], ls_remote=2, echec_sur="/actions/workflows/copie-alpine.yml/dispatches")
+    erreur("2ᵉ lancement en échec", lambda: b.ouvrir_pr("0.76.1", CIBLE, api=api, executer_git=g, proprietaire="soma-smart"),
+           "copie-alpine.yml/dispatches")
+    assert "git push" in appels["ordre"] and "POST /pulls" not in appels["ordre"], \
+        f"aucune PR ne doit exister quand la CI n'a pas pu être lancée : {appels['ordre']}"
+    # run suivant : la branche existe déjà (ls-remote = 0), toujours sans PR → pas de repush, CI relancée, PR ouverte
+    api, g, appels = faux(pulls_existantes=[], ls_remote=0)
+    assert b.ouvrir_pr("0.76.1", CIBLE, api=api, executer_git=g, proprietaire="soma-smart") == "ouverte"
+    ordre = appels["ordre"]
+    assert "git push" not in ordre and "git commit" not in ordre, ordre
+    assert ordre.index(DISPATCH_BUILD) < ordre.index(DISPATCH_COPIE) < ordre.index("POST /pulls"), ordre
+    # 1ᵉʳ lancement en échec : même garantie
+    api, g, appels = faux(pulls_existantes=[], echec_sur="/actions/workflows/build-python-slim.yml/dispatches")
+    erreur("1ᵉʳ lancement en échec", lambda: b.ouvrir_pr("0.76.1", CIBLE, api=api, executer_git=g, proprietaire="soma-smart"),
+           "build-python-slim.yml/dispatches")
+    assert "POST /pulls" not in appels["ordre"] and DISPATCH_COPIE not in appels["ordre"], appels["ordre"]
+
+
+def test_workflows_lances_existent_et_se_lancent_a_la_main():
+    """Un nom de fichier faux ou un workflow sans `workflow_dispatch` ferait échouer le lancement APRÈS le push, à chaque run."""
+    dossier = Path(__file__).resolve().parent.parent / ".github" / "workflows"
+    for nom in b.WORKFLOWS_CI:
+        assert (dossier / nom).exists(), f"{nom} n'existe pas dans .github/workflows"
+        assert "workflow_dispatch" in (dossier / nom).read_text(), f"{nom} n'a pas de déclencheur workflow_dispatch"
+
+
+def test_helper_git_fail_closed():
+    class Termine:
+        def __init__(self, code):
+            self.returncode = code
+    ancien = b.subprocess.run
+    try:
+        for code, tolerer, attendu in ((0, (0,), 0), (2, (0, 2), 2), (2, (0,), None), (128, (0, 2), None), (1, (0,), None)):
+            b.subprocess.run = lambda cmd, check, c=code: Termine(c)
+            if attendu is None:
+                erreur(f"git code {code}", lambda: b.git(["push", "origin", "x"], tolerer=tolerer), f"code {code}")
+            else:
+                assert b.git(["ls-remote"], tolerer=tolerer) == attendu
+    finally:
+        b.subprocess.run = ancien
 
 
 def test_jamais_de_dispatch_de_mirror_dhi():
@@ -250,11 +362,13 @@ def test_branche_poussee_sans_pr_reprend_sans_repousser():
     assert any(a[:2] == ("POST", "/pulls") for a in appels["api"])
 
 
-def test_pr_refusee_ne_lance_pas_la_ci_et_leve():
+def test_pr_refusee_leve_apres_la_ci_et_se_reprend():
+    # La CI est lancée AVANT la PR : si la création est refusée (réglage d'organisation), le run est rouge, la branche et la CI
+    # existent déjà, et le run suivant n'aura que la PR à ouvrir (branche présente → pas de repush).
     api, g, appels = faux(pulls_existantes=[], echec_sur="/pulls")
     erreur("création de PR refusée", lambda: b.ouvrir_pr("0.76.1", CIBLE, api=api, executer_git=g, proprietaire="soma-smart"),
            "refusé")
-    assert not any("/dispatches" in a[1] for a in appels["api"]), "pas de CI lancée pour une PR qui n'existe pas"
+    assert DISPATCH_BUILD in appels["ordre"] and DISPATCH_COPIE in appels["ordre"]
 
 
 def test_corps_de_pr_dit_la_limite_de_la_ci():
@@ -298,13 +412,31 @@ def test_a_jour_sort_en_vert_et_le_dit():
     assert code == 0 and "à jour" in sortie and "bump=false" in gh and contenu == "0.76.1\n"
 
 
+@contextmanager
+def env_isole(dossier):
+    """Sans GITHUB_TOKEN, avec un GITHUB_OUTPUT jetable : le test ne touche jamais la sortie du step CI réel, et l'environnement
+    d'origine est RESTAURÉ (un `pop` sec laisserait le jeton supprimé pour les tests suivants)."""
+    noms = ("GITHUB_OUTPUT", "GITHUB_TOKEN")
+    ancien = {k: os.environ.get(k) for k in noms}
+    os.environ["GITHUB_OUTPUT"] = str(Path(dossier) / "sortie")
+    os.environ.pop("GITHUB_TOKEN", None)
+    try:
+        yield
+    finally:
+        for k, v in ancien.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
 def test_jeton_absent_est_rouge_et_n_ecrit_rien():
-    with tempfile.TemporaryDirectory() as d:
+    with tempfile.TemporaryDirectory() as d, env_isole(d):
         f = Path(d) / ".trivy-version"
         f.write_text("0.76.1\n")
-        os.environ.pop("GITHUB_TOKEN", None)
-        erreur("jeton absent", lambda: b.main([], fichier=f, maintenant=MAINTENANT,
-                                              releases=[rel("v0.77.0", 10), rel("v0.76.1", 30)]), "GITHUB_TOKEN absent")
+        with redirect_stdout(io.StringIO()):
+            erreur("jeton absent", lambda: b.main([], fichier=f, maintenant=MAINTENANT,
+                                                  releases=[rel("v0.77.0", 10), rel("v0.76.1", 30)]), "GITHUB_TOKEN absent")
         assert f.read_text() == "0.76.1\n", "le fichier ne doit pas être modifié avant d'avoir de quoi ouvrir la PR"
 
 

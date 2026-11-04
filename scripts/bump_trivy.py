@@ -20,6 +20,7 @@ dont l'automerge `github-actions`, à un dépôt qui porte cette config). Sans s
 explicitement par `workflow_dispatch` sur la branche — SAUF `mirror-dhi.yml`, qui publie vers Harbor sans garde de branche.
 """
 import argparse
+import http.client
 import json
 import os
 import re
@@ -36,8 +37,14 @@ URL_RELEASES = "https://api.github.com/repos/aquasecurity/trivy/releases?per_pag
 AGE_MIN = timedelta(days=3)
 # build + scan sans publier (leurs steps de publication exigent `ref == main`). JAMAIS `mirror-dhi.yml`.
 WORKFLOWS_CI = ("build-python-slim.yml", "copie-alpine.yml")
-RE_VERSION = re.compile(r"\d+\.\d+\.\d+")
-RE_TAG = re.compile(r"v(\d+)\.(\d+)\.(\d+)")
+# `re.ASCII` : sans lui `\d` accepte les chiffres Unicode (« ٣.٤.٥ »), qui finiraient dans un titre de PR et un message de commit.
+RE_VERSION = re.compile(r"\d+\.\d+\.\d+", re.ASCII)
+RE_TAG = re.compile(r"v(\d+)\.(\d+)\.(\d+)", re.ASCII)
+
+# Tout ce qu'une lecture de réponse peut lever SANS être une `HTTPError` : réseau (URLError, OSError dont timeout,
+# connexion réinitialisée), réponse tronquée (`IncompleteRead`) ou illisible (`ValueError` : JSON invalide, UTF-8 invalide).
+# Sans cela, un incident pendant `reponse.read()` sortirait en traceback brut, sans les essais ni la ligne `::error::`.
+RESEAU = (urllib.error.URLError, OSError, http.client.HTTPException, ValueError)
 
 
 class BumpError(Exception):
@@ -71,7 +78,7 @@ def releases_anonymes(ouvrir=urllib.request.urlopen, essais=3, pause=5, dormir=t
             if e.code in (403, 429):
                 raise BumpError(f"API GitHub : HTTP {e.code} (quota anonyme ou refus d'IP) — pas de nouvel essai") from e
             derniere = f"HTTP {e.code}"
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+        except RESEAU as e:
             derniere = f"{type(e).__name__}: {e}"
         if essai < essais:
             dormir(pause)
@@ -155,6 +162,8 @@ class Github:
             with self.ouvrir(requete, timeout=30) as reponse:
                 brut = reponse.read().decode()
                 return json.loads(brut) if brut else None
+        # ⚠️ L'ORDRE COMPTE : `HTTPError` hérite d'`URLError`. Le `except` le plus précis doit venir EN PREMIER, sinon le plus
+        # large l'attrape et un `raise` dans son handler ne repasse PAS par la clause sœur : on perdrait le message HTTP.
         except urllib.error.HTTPError as e:
             detail = e.read().decode()[:300] if hasattr(e, "read") else ""
             aide = ""
@@ -162,6 +171,9 @@ class Github:
                 aide = (" — si le message dit que les Actions ne peuvent pas créer de PR : Settings > Actions > General > "
                         "« Allow GitHub Actions to create and approve pull requests », au niveau du dépôt ET de l'organisation")
             raise BumpError(f"{methode} {chemin} : HTTP {e.code} {detail}{aide}") from e
+        except RESEAU as e:
+            # Réseau, délai dépassé, réponse non JSON : une ligne `::error::` lisible plutôt qu'un traceback brut.
+            raise BumpError(f"{methode} {chemin} : {type(e).__name__}: {e}") from e
 
 
 def git(args, tolerer=(0,)):
@@ -184,10 +196,15 @@ def ouvrir_pr(courante, cible, *, api, executer_git, proprietaire):
         executer_git(["-c", "user.name=github-actions[bot]", "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
                       "commit", "-m", f"chore(trivy): {courante} → {cible['version']}"])
         executer_git(["push", "origin", branche])
-    api("POST", "/pulls", {"title": f"chore(trivy): {courante} → {cible['version']}", "head": branche, "base": "main",
-                           "body": corps_pr(courante, cible, branche)})
+    # ⚠️ L'ORDRE EST UNE GARANTIE : branche poussée → CI lancée → PR créée, JAMAIS la PR avant la CI. Si un lancement échoue
+    # APRÈS la création de la PR, le run suivant la voit (« existe »), sort en VERT et ne relance rien : une PR sans aucun
+    # check, silencieusement. Dans cet ordre, un échec laisse une branche SANS PR : le run suivant saute le push, relance la CI
+    # (sans risque : elles ne publient pas) et ouvre la PR. Les checks se rattachent au SHA de la branche, donc ceux lancés
+    # avant la PR apparaissent quand même dedans.
     for workflow in WORKFLOWS_CI:
         api("POST", f"/actions/workflows/{workflow}/dispatches", {"ref": branche})
+    api("POST", "/pulls", {"title": f"chore(trivy): {courante} → {cible['version']}", "head": branche, "base": "main",
+                           "body": corps_pr(courante, cible, branche)})
     return "ouverte"
 
 

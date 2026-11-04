@@ -7,9 +7,10 @@ name: bump-trivy
 # l'automerge `github-actions`, s'appliquerait à ce dépôt). Sans ce workflow, la version de Trivy gèle en silence.
 #
 # ⚠️ LE SIGNAL, C'EST LE ROUGE. Un échec de lecture (API de Trivy, quota, format changé) ou de création de PR fait échouer
-# le run : GitHub prévient alors l'auteur de la dernière modification du cron. Jamais « rien à faire » par défaut. Si les
-# runs rouges s'enchaînent sans que personne ne les lise, ce workflow ne protège plus rien : le relire fait partie du
-# suivi de Trivy.
+# le run. Jamais « rien à faire » par défaut. ⚠️ La notification n'est PAS une alarme fiable : GitHub prévient (par défaut)
+# l'auteur de la dernière modification du cron, et seulement s'il a gardé les notifications d'échec Actions ; si c'est un bot
+# ou quelqu'un qui a quitté l'organisation, personne n'est prévenu. Lire les runs rouges de ce workflow fait partie du suivi
+# de Trivy : s'ils s'enchaînent sans que personne ne les lise, il ne protège plus rien.
 #
 # ⚠️ PERMISSIONS (toutes sur CE dépôt) : `contents: write` pour pousser la branche `bump/trivy-X.Y.Z`, `pull-requests: write`
 # pour la PR, `actions: write` pour lancer les CI à la main. Le `GITHUB_TOKEN` n'ouvre PAS de runs `pull_request` : sans ce
@@ -20,13 +21,13 @@ name: bump-trivy
 # General > Allow GitHub Actions to create and approve pull requests), que seul un admin de l'organisation peut changer.
 on:
   schedule:
-    # 07:30 UTC : hors des nocturnes (mirror 02:00, build 03:00, copie 03:15) dont les `concurrency` partagent le runner,
-    # et après la passe Renovate de 06:00.
+    # 07:30 UTC : hors des nocturnes (mirror 02:00, build 03:00, copie 03:15), qui occupent le même runner (label
+    # `onprem-dev-base-images`) pendant leur exécution, et après la passe Renovate de 06:00.
     - cron: "30 7 * * *"
   workflow_dispatch:
     inputs:
       simuler_version_courante:
-        description: "SIMULATION (rien n'est écrit, poussé ni lancé) : X.Y.Z traité comme version courante, pour voir la PR qui serait ouverte"
+        description: "SIMULATION (ni fichier modifié, ni push, ni PR, ni CI lancée ; seule la sortie du step est renseignée) : X.Y.Z traité comme version courante, pour voir la PR qui serait ouverte"
         required: false
         default: ""
 concurrency:
