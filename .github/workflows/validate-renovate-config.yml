@@ -105,6 +105,9 @@ jobs:
       - name: Contre-tests de l'installation de Trivy
         run: python3 scripts/test_install_trivy.py
 
+      - name: Contre-tests du bump de Trivy
+        run: python3 scripts/test_bump_trivy.py
+
       - name: Contre-tests de la décision de publication
         run: python3 scripts/test_decision_publication.py
 

@@ -1,0 +1,57 @@
+name: bump-trivy
+# Ouvre une PR quand une release stable et MÛRE (≥ 3 j) de Trivy est parue : compare `.trivy-version` aux releases de
+# `aquasecurity/trivy`. Logique, gardes et cas d'échec : `scripts/bump_trivy.py`, testé par `scripts/test_bump_trivy.py`.
+#
+# ⚠️ POURQUOI UN WORKFLOW MAISON ET PAS RENOVATE : `base-images` n'est pas autodécouvert par Renovate (README, « Aucun
+# Renovate ne suit… ») et l'y ajouter est une décision de périmètre (toute la politique de `renovate-config.js`, dont
+# l'automerge `github-actions`, s'appliquerait à ce dépôt). Sans ce workflow, la version de Trivy gèle en silence.
+#
+# ⚠️ LE SIGNAL, C'EST LE ROUGE. Un échec de lecture (API de Trivy, quota, format changé) ou de création de PR fait échouer
+# le run : GitHub prévient alors l'auteur de la dernière modification du cron. Jamais « rien à faire » par défaut. Si les
+# runs rouges s'enchaînent sans que personne ne les lise, ce workflow ne protège plus rien : le relire fait partie du
+# suivi de Trivy.
+#
+# ⚠️ PERMISSIONS (toutes sur CE dépôt) : `contents: write` pour pousser la branche `bump/trivy-X.Y.Z`, `pull-requests: write`
+# pour la PR, `actions: write` pour lancer les CI à la main. Le `GITHUB_TOKEN` n'ouvre PAS de runs `pull_request` : sans ce
+# lancement, la PR n'aurait aucun check. Il ne peut pas non plus modifier `.github/workflows/` — d'où le fichier
+# `.trivy-version`, hors de ce dossier : aucun PAT à droit `workflow` n'est nécessaire, ni souhaitable.
+#
+# ⚠️ Si le premier run échoue sur « not permitted to create pull requests » : réglage d'ORGANISATION (Settings > Actions >
+# General > Allow GitHub Actions to create and approve pull requests), que seul un admin de l'organisation peut changer.
+on:
+  schedule:
+    # 07:30 UTC : hors des nocturnes (mirror 02:00, build 03:00, copie 03:15) dont les `concurrency` partagent le runner,
+    # et après la passe Renovate de 06:00.
+    - cron: "30 7 * * *"
+  workflow_dispatch:
+    inputs:
+      simuler_version_courante:
+        description: "SIMULATION (rien n'est écrit, poussé ni lancé) : X.Y.Z traité comme version courante, pour voir la PR qui serait ouverte"
+        required: false
+        default: ""
+concurrency:
+  group: bump-trivy
+  cancel-in-progress: false
+jobs:
+  bump:
+    runs-on: onprem-dev-base-images
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      # Le jeton reste dans `.git/config` (par défaut) : le script pousse la branche.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Comparer à la dernière release de Trivy et ouvrir la PR
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          # Passée par l'environnement, jamais interpolée dans le script : l'entrée est validée `X.Y.Z` par le script.
+          SIMULATION: ${{ inputs.simuler_version_courante }}
+        run: |
+          set -eu
+          if [ -n "$SIMULATION" ]; then
+            python3 scripts/bump_trivy.py --simuler-version-courante "$SIMULATION"
+          else
+            python3 scripts/bump_trivy.py
+          fi
