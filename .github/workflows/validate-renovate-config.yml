@@ -101,6 +101,10 @@ jobs:
       - name: Contre-tests du verdict Trivy
         run: python3 scripts/test_verdict_trivy.py
 
+      # Linux requis (`sha256sum` GNU) : le test échoue franchement ailleurs plutôt que de se sauter en vert.
+      - name: Contre-tests de l'installation de Trivy
+        run: python3 scripts/test_install_trivy.py
+
       - name: Contre-tests de la décision de publication
         run: python3 scripts/test_decision_publication.py
 

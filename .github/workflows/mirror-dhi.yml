@@ -20,28 +20,19 @@ jobs:
       matrix:
         version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
+      # Nouveau : le script d'installation et `.trivy-version` vivent dans le dépôt, ce workflow n'en lisait aucun fichier.
+      # ⚠️ Ce workflow ne tourne PAS sur PR (schedule + dispatch seulement) : ce checkout et l'appel du script ne sont jamais
+      # joués avant le merge. Le script est couvert par `test_install_trivy.py` et joué par build-python-slim/copie-alpine ;
+      # la première preuve de CE workflow est son run de 02:00 UTC suivant le merge.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Rien ici ne pousse sur git : le jeton ne doit pas rester dans `.git/config` pendant que du code s'exécute.
+          persist-credentials: false
       - name: Install trivy
         # Le runner ARC tourne en non-root → pas d'écriture dans /usr/local/bin.
         # Installe dans un répertoire writable et l'ajoute au PATH des steps suivants.
-        # Version ÉPINGLÉE, téléchargement rejoué et SHA-256 vérifié : même step que `build-python-slim.yml`, dont le
-        # commentaire détaille pourquoi (`install.sh` sur `main`, et un `--retry` seul ne rejoue pas un échec DNS).
-        # Le motif `TRIVY_VERSION` de `renovate-config.js` lit la ligne ci-dessous : ne pas la déplacer hors d'un `env:`
-        # de workflow, ni la commenter, sans quoi elle gèle en silence. Les trois workflows se bumpent ensemble.
-        env:
-          TRIVY_VERSION: "0.76.1"
-        run: |
-          set -eu
-          mkdir -p "$HOME/.local/bin"
-          base="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
-          archive="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
-          dir="$(mktemp -d)"
-          curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -o "$dir/$archive" "$base/$archive"
-          curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -o "$dir/checksums.txt" "$base/trivy_${TRIVY_VERSION}_checksums.txt"
-          (cd "$dir" && grep -F " $archive" checksums.txt | sha256sum -c -)
-          tar -xzf "$dir/$archive" -C "$HOME/.local/bin" trivy
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          # `GITHUB_PATH` ne vaut qu'à partir du step SUIVANT : appeler le binaire par son chemin.
-          "$HOME/.local/bin/trivy" --version
+        # Même installation que `build-python-slim.yml` : version de `.trivy-version`, script `scripts/install_trivy.sh`.
+        run: bash scripts/install_trivy.sh
       - name: Login dhi.io (pull DHI)
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
