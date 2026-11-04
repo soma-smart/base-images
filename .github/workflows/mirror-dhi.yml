@@ -23,11 +23,25 @@ jobs:
       - name: Install trivy
         # Le runner ARC tourne en non-root → pas d'écriture dans /usr/local/bin.
         # Installe dans un répertoire writable et l'ajoute au PATH des steps suivants.
+        # Version ÉPINGLÉE, téléchargement rejoué et SHA-256 vérifié : même step que `build-python-slim.yml`, dont le
+        # commentaire détaille pourquoi (`install.sh` sur `main`, et un `--retry` seul ne rejoue pas un échec DNS).
+        # Le motif `TRIVY_VERSION` de `renovate-config.js` lit la ligne ci-dessous : ne pas la déplacer hors d'un `env:`
+        # de workflow, ni la commenter, sans quoi elle gèle en silence. Les trois workflows se bumpent ensemble.
+        env:
+          TRIVY_VERSION: "0.76.1"
         run: |
+          set -eu
           mkdir -p "$HOME/.local/bin"
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sh -s -- -b "$HOME/.local/bin"
+          base="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
+          archive="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          dir="$(mktemp -d)"
+          curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -o "$dir/$archive" "$base/$archive"
+          curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 -o "$dir/checksums.txt" "$base/trivy_${TRIVY_VERSION}_checksums.txt"
+          (cd "$dir" && grep -F " $archive" checksums.txt | sha256sum -c -)
+          tar -xzf "$dir/$archive" -C "$HOME/.local/bin" trivy
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          # `GITHUB_PATH` ne vaut qu'à partir du step SUIVANT : appeler le binaire par son chemin.
+          "$HOME/.local/bin/trivy" --version
       - name: Login dhi.io (pull DHI)
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
