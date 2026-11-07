@@ -28,7 +28,7 @@ jobs:
           owner: soma-smart
           # pas de 'repositories' => token sur TOUTES les installations de l'App = les consommateurs
       - name: Checkout (config global renovate-config.js)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # ⚠️ RÉPERTOIRE PARTAGÉ, ET C'EST TOUT LE SUJET. Le runner est en mode dind : le
       # `docker run` construit par l'action est exécuté par le démon dind, donc un
       # `-v /tmp:/tmp` monte le /tmp DU DÉMON, pas celui de cette étape. Mesuré le
