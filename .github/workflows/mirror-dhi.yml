@@ -27,7 +27,7 @@ jobs:
       # ⚠️ Ce workflow ne tourne PAS sur PR (schedule + dispatch seulement) : ce checkout et l'appel du script ne sont jamais
       # joués avant le merge. Le script est couvert par `test_install_trivy.py` et joué par build-python-slim/copie-alpine ;
       # la première preuve de CE workflow est son run de 02:00 UTC suivant le merge.
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Rien ici ne pousse sur git : le jeton ne doit pas rester dans `.git/config` pendant que du code s'exécute.
           persist-credentials: false
