@@ -6,4 +6,4 @@
 # première CVE corrigeable ou à la fin de support ; au bump, vérifier à la main que la version a ≥ 3 jours. Image du conteneur de job des builds MCP (`mcp-servers`), où tourne du code d'auteur non relu :
 # une branche Alpine HORS SUPPORT n'y reçoit plus aucun correctif (la 3.20 est sortie de support le 2026-04-01).
 # ⚠️ Une seule ligne FROM, sans `AS` : le workflow refuse tout autre forme.
-FROM docker.io/library/alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+FROM docker.io/library/alpine:3.24.4@sha256:93b41ef40b1677fce8fcc64ff4af09daddfacf5040afde618bc46c1e2d1cc7d4
