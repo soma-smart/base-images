@@ -41,6 +41,14 @@ MOTIFS = (
 )
 
 
+# ⚠️ Dépôts qu'`autodiscoverFilter` (renovate-config.js) EXCLUT de la boucle. `renovate-config-validator`
+# accepte n'importe quelle chaîne comme filtre : un filtre inopérant (casse, évolution de la
+# sémantique de Renovate) ne ferait rougir RIEN, et l'incident du 2026-09-14 (politique de la
+# boucle appliquée à infra-datacenter-docs, dont l'automerge CVE) reviendrait en silence. Ce
+# garde lit le journal : si un dépôt exclu est TRAITÉ, le gate rougit.
+DEPOTS_EXCLUS = ("soma-smart/infra-datacenter-docs",)
+
+
 def analyser(chemin):
     """Rend (entrees, malformees, depots_termines, avertissements)."""
     entrees = 0
@@ -110,6 +118,14 @@ def main(argv):
         print(f"::error::aucun depot termine dans {chemin} — Renovate n'a traite AUCUN depot.")
         print("        Causes typiques : installation de la GitHub App retiree,")
         print("        autodiscover vide, abandon precoce. Ce n'est pas « aucun echec ».")
+        return 1
+
+    traites_exclus = sorted(d for d in depots if d.lower() in DEPOTS_EXCLUS)
+    if traites_exclus:
+        print(f"::error::depot EXCLU traite par la boucle : {', '.join(traites_exclus)}")
+        print("        `autodiscoverFilter` de renovate-config.js n'a pas joue : ce depot a son")
+        print("        propre Renovate (soma-renovate-infra) et la politique de cette boucle")
+        print("        (dont l'automerge CVE) ne doit pas s'y appliquer.")
         return 1
 
     if trouves:

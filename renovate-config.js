@@ -20,6 +20,18 @@
 module.exports = {
   platform: "github",
   autodiscover: true,
+  // ⚠️ `infra-datacenter-docs` est EXCLU de la boucle, même si l'App `soma-base-bumper` y a accès
+  // (« All repositories », depuis l'arbitrage du 2026-11-09 pour l'onboarding des apps).
+  // Sinon, avec `requireConfig: "ignored"`, ce dépôt est traité comme un consommateur COMPLET :
+  // son `renovate.json` est ignoré et la politique de CE fichier s'y applique — dont la règle CVE
+  // (`minimumReleaseAge: null` + automerge mineur/patch). Constaté deux fois : le 2026-09-14
+  // (#1500, #1505, #1510) et dès le 2026-11-06 (10 PR : Airflow et ses providers, selenium,
+  // python…, que `renovate.json` désactive ou met en dashboard à dessein). Ce dépôt a SON Renovate
+  // (`soma-renovate-infra`). Un filtre à motif négatif SEUL signifie « tous les dépôts sauf celui-ci »
+  // (lib/util/string-match.ts, `matchRegexOrGlobList`). Le garde `scripts/verifier-lookups.py`
+  // fait rougir le run si ce dépôt est malgré tout traité (le validateur n'en contrôle pas la valeur). ⚠️ Un nouveau dépôt de
+  // l'infra qui aurait lui aussi son propre Renovate doit être ajouté ICI.
+  autodiscoverFilter: ["!soma-smart/infra-datacenter-docs"],
   onboarding: false,
   // Ce fichier global est la SEULE config : on ignore tout renovate.json de repo
   // (sinon il serait mergé avec la précédence la plus haute et pourrait désactiver
@@ -414,6 +426,12 @@ module.exports = {
       // politique d'un AUTRE. Les 3 artefacts ont été nettoyés le jour même,
       // l'installation immédiatement retirée.
       //
+      // ⚠️ MISE À JOUR 2026-11-09 : l'App est depuis en « All repositories », le même incident est
+      // revenu, et `autodiscoverFilter` est POSÉ en tête de ce fichier (la voie « non testée » ci-dessous
+      // est donc prise ; son effet se lit dans le journal du run, garde `verifier-lookups.py`).
+      // Ce qui suit est l'HISTORIQUE de la décision de septembre : ses « n'a jamais eu accès » et
+      // « non instruite » décrivent l'état d'alors. Le `enabled: false` plus bas reste VOLONTAIRE : ce
+      // `@main` ne peut recevoir qu'un pin SHA, que cette boucle ne doit pas proposer.
       // ⚠️ UNE VOIE D'ACCÈS SCOPÉ EXISTE PEUT-ÊTRE (`autodiscoverFilter`), ET ELLE
       // N'A PAS ÉTÉ TESTÉE — trouvé en revue de #15, corrigeant une première rédaction
       // qui affirmait à tort son absence. `autodiscoverFilter` peut exclure un dépôt
