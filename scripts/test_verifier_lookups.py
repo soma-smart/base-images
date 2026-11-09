@@ -40,6 +40,13 @@ CAS = [
     ("tronque_sur_l_avertissement",
      [DEPOT_OK, '{"warnings":["Failed to look up github-releases package aquasecurity/trivy"'],
      1, "tronque"),
+    # Le filtre d'autodiscover n'a pas joue : un depot EXCLU a ete traite (casse comprise).
+    ("depot_exclu_traite", [DEPOT_OK,
+     '{"msg":"Repository finished","repository":"soma-smart/infra-datacenter-docs"}'],
+     1, "depot EXCLU"),
+    ("depot_exclu_traite_casse", [DEPOT_OK,
+     '{"msg":"Repository finished","repository":"Soma-Smart/Infra-Datacenter-Docs"}'],
+     1, "depot EXCLU"),
     ("aucun_depot_traite",
      ['{"msg":"Renovate config"}', '{"msg":"Autodiscovered 0 repositories"}'],
      1, "AUCUN depot"),
