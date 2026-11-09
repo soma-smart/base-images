@@ -49,7 +49,7 @@ python:<ver>-slim  ──(build nocturne, publié si le contenu change + libgomp
 - **Verdict Trivy** : `scripts/verdict_trivy.py` (partagé avec `build-python-slim`) — couverture prouvée, `EOSL` refusé, CVE fixable Critical/High = échec, sans exception.
 - **Écart assumé** : pas de passage par Harbor (son seul consommateur est ghcr) ; on perd le scan-on-push de Harbor, remplacé par ce gate.
 - **Gestes manuels** : package ghcr **public** (irréversible) — le premier run est rouge par construction ; secret `HEALTHCHECKS_URL_COPIE_ALPINE` (sinon dead-man's switch inerte, signalé en avertissement).
-- ⚠️ **Aucun Renovate ne suit cette chaîne aujourd'hui** : constaté le 2026-10-19, Renovate autodécouvre 8 dépôts, ni `base-images` ni `mcp-servers` n'en font partie. Ni `alpine/Dockerfile`, ni l'épingle du consommateur (`container: image: ghcr.io/soma-smart/base/alpine:<X.Y.Z>@sha256:…`) ne reçoivent de PR. L'alarme est le cron de `copie-alpine` (rouge à la première CVE corrigeable ou à la fin de support) ; au bump, vérifier à la main qu'une version a ≥ 3 jours. Étendre le périmètre de `soma-base-bumper` applique TOUTE la politique de `renovate-config.js` à ces dépôts : décision de Gautier. Une datasource `docker` sur ghcr n'a de toute façon pas d'horodatage.
+- ⚠️ **Aucun Renovate ne suit cette chaîne aujourd'hui** : le périmètre de la boucle est l'opt-in par topic `soma-base-bumper` (`autodiscoverTopics` de `renovate-config.js` ; 8 dépôts constatés le 2026-10-19, ni `base-images` ni `mcp-servers` n'en font partie). Ni `alpine/Dockerfile`, ni l'épingle du consommateur (`container: image: ghcr.io/soma-smart/base/alpine:<X.Y.Z>@sha256:…`) ne reçoivent de PR. L'alarme est le cron de `copie-alpine` (rouge à la première CVE corrigeable ou à la fin de support) ; au bump, vérifier à la main qu'une version a ≥ 3 jours. Étendre le périmètre de `soma-base-bumper` applique TOUTE la politique de `renovate-config.js` à ces dépôts : décision de Gautier. Une datasource `docker` sur ghcr n'a de toute façon pas d'horodatage.
 
 ## Version de Trivy — `.trivy-version`
 
@@ -114,7 +114,7 @@ Le mirror publie une base **redigestée**, mais ça ne remédie rien tant que le
 |---|---|
 | `.github/workflows/renovate.yml` | Lance Renovate self-hosted (cron 3×/jour + `workflow_dispatch`) sur le runner `onprem-dev-base-images`. Génère un token d'installation de la GitHub App puis exécute `renovatebot/github-action`. |
 | `renovate-config.js` | **Config globale unique** (`requireConfig: "ignored"` → les `renovate.json` de repo sont ignorés). `autodiscover` + `hostRules` Harbor + `packageRules` (voir plus bas). |
-| GitHub App **`soma-base-bumper`** | Auth de Renovate. `autodiscover` ⇒ **son installation = la liste des repos consommateurs**. Perms : `contents:write` + `pull-requests:write` + `checks:read` + `statuses:read`. Secrets repo : `BASE_BUMPER_APP_ID`, `BASE_BUMPER_PRIVATE_KEY`. |
+| GitHub App **`soma-base-bumper`** | Auth de Renovate. `autodiscover` + `autodiscoverTopics` ⇒ **les consommateurs = les dépôts de son installation (« All repositories ») qui portent le topic `soma-base-bumper`**. Perms : `contents:write` + `pull-requests:write` + `checks:read` + `statuses:read`. Secrets repo : `BASE_BUMPER_APP_ID`, `BASE_BUMPER_PRIVATE_KEY`. |
 | `ci-docker-build.yml` (dans **chaque app**) | Gate : `docker build` sur PR. C'est le check qui doit passer au vert avant que Renovate automerge un bump de digest. |
 
 ### Le flux
