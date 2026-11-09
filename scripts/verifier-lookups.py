@@ -116,8 +116,9 @@ def main(argv):
         # l'App perd une installation, `autodiscover` rend 0 depot : Renovate journalise
         # proprement, sort 0, aucune PR — indiscernable de « rien a mettre a jour ».
         print(f"::error::aucun depot termine dans {chemin} — Renovate n'a traite AUCUN depot.")
-        print("        Causes typiques : installation de la GitHub App retiree,")
-        print("        autodiscover vide, abandon precoce. Ce n'est pas « aucun echec ».")
+        print("        Causes typiques : installation de la GitHub App retiree, topic")
+        print("        `soma-base-bumper` (autodiscoverTopics) absent de TOUS les depots, autodiscover vide,")
+        print("        abandon precoce. Ce n'est pas « aucun echec ».")
         return 1
 
     traites_exclus = sorted(d for d in depots if d.lower() in DEPOTS_EXCLUS)

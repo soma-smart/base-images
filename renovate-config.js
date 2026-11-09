@@ -5,8 +5,12 @@
 // par repo. Ce fichier est la seule source de vérité (requireConfig: "ignored" =>
 // les éventuels renovate.json résiduels des repos sont ignorés).
 //
-// Portée : autodiscover sur les repos où la GitHub App `soma-base-bumper` est
-// installée (= les consommateurs). Quatre familles de mises à jour, uniformes partout :
+// Portée : OPT-IN PAR TOPIC GitHub `soma-base-bumper` (`autodiscoverTopics`, plus bas), parmi les
+// dépôts que l'installation de l'App `soma-base-bumper` voit. ⚠️ L'App est en « All repositories »
+// (arbitrage du 2026-11-09, onboarding des apps) : SANS ce topic la boucle traite les ~178 dépôts de
+// l'organisation. Constaté : dès le 2026-11-06 le périmètre est passé de 8 à 178 dépôts, les runs de
+// 5 min à 1 h, et le gate des lookups est rouge en permanence (registre Azure privé de `devlens`,
+// `aquasecurity/trivy-action`). Quatre familles de mises à jour, uniformes sur les dépôts qui portent le topic :
 //   1. digest de la base DHI interne  -> automerge (gate = ci-docker-build sur PR)
 //   2. github-actions (SHA-pinnées)   -> automerge minor/patch/digest, majors en dashboard
 //   3. deps applicatives (pip/pep621) -> mineur/patch automerge (matures 3j), majeur en PR
@@ -20,7 +24,20 @@
 module.exports = {
   platform: "github",
   autodiscover: true,
-  // ⚠️ `infra-datacenter-docs` est EXCLU de la boucle, même si l'App `soma-base-bumper` y a accès
+  // ⚠️ OPT-IN : seuls les dépôts portant le topic `soma-base-bumper` sont traités (Renovate, plateforme
+  // GitHub avec jeton d'App : `installation/repositories` filtré sur `repo.topics`, lib/modules/platform/
+  // github/index.ts). Taguer un dépôt, c'est lui APPLIQUER toute la politique de ce fichier, automerge
+  // compris : ne pas le faire par défaut. ⚠️ MODE DE PANNE SILENCIEUX : un consommateur SANS topic sort de
+  // la boucle sans aucun signal (le garde de `verifier-lookups.py` ne voit que la perte TOTALE) ; le digest
+  // de son `FROM` finit purgé par le GC Harbor et son build casse quelques jours plus tard. Tout nouveau
+  // dépôt d'app doit donc recevoir le topic À LA CRÉATION (provisioning d'`infra-datacenter-docs`).
+  // Le topic s'écrit en MINUSCULES (GitHub normalise, Renovate compare à l'identique) ; retirer le topic
+  // d'un dépôt le sort de la boucle, sans signal non plus.
+  // `base-images` et `mcp-servers` n'ont PAS le topic, à dessein : étendre le périmètre est une décision
+  // de Gautier (README, « Aucun Renovate ne suit cette chaîne »).
+  autodiscoverTopics: ["soma-base-bumper"],
+  // ⚠️ `infra-datacenter-docs` est EXCLU de la boucle (il ne porte pas le topic ; ce filtre le défend si
+  // quelqu'un le posait), même si l'App `soma-base-bumper` y a accès
   // (« All repositories », depuis l'arbitrage du 2026-11-09 pour l'onboarding des apps).
   // Sinon, avec `requireConfig: "ignored"`, ce dépôt est traité comme un consommateur COMPLET :
   // son `renovate.json` est ignoré et la politique de CE fichier s'y applique — dont la règle CVE
