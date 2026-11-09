@@ -20,6 +20,17 @@
 module.exports = {
   platform: "github",
   autodiscover: true,
+  // ⚠️ `infra-datacenter-docs` est EXCLU de la boucle, même si l'App `soma-base-bumper` y a accès
+  // (« All repositories », depuis l'arbitrage du 2026-11-09 pour l'onboarding des apps).
+  // Sinon, avec `requireConfig: "ignored"`, ce dépôt est traité comme un consommateur COMPLET :
+  // son `renovate.json` est ignoré et la politique de CE fichier s'y applique — dont la règle CVE
+  // (`minimumReleaseAge: null` + automerge mineur/patch). Constaté deux fois : le 2026-09-14
+  // (#1500, #1505, #1510) et dès le 2026-11-06 (10 PR : Airflow et ses providers, selenium,
+  // python…, que `renovate.json` désactive ou met en dashboard à dessein). Ce dépôt a SON Renovate
+  // (`soma-renovate-infra`). Seule négation : « tous sauf » — une liste sans motif positif garde
+  // tout le reste (lib/util/string-match.ts, `matchRegexOrGlobList`). ⚠️ Un nouveau dépôt de
+  // l'infra qui aurait lui aussi son propre Renovate doit être ajouté ICI.
+  autodiscoverFilter: ["!soma-smart/infra-datacenter-docs"],
   onboarding: false,
   // Ce fichier global est la SEULE config : on ignore tout renovate.json de repo
   // (sinon il serait mergé avec la précédence la plus haute et pourrait désactiver
@@ -414,6 +425,9 @@ module.exports = {
       // politique d'un AUTRE. Les 3 artefacts ont été nettoyés le jour même,
       // l'installation immédiatement retirée.
       //
+      // ⚠️ MISE À JOUR 2026-11-09 : l'App est depuis en « All repositories » et le même incident
+      // est revenu ; `autodiscoverFilter` est maintenant POSÉ en tête de ce fichier. Ce qui suit
+      // est l'historique de la décision, conservé pour la raison de l'exclusion.
       // ⚠️ UNE VOIE D'ACCÈS SCOPÉ EXISTE PEUT-ÊTRE (`autodiscoverFilter`), ET ELLE
       // N'A PAS ÉTÉ TESTÉE — trouvé en revue de #15, corrigeant une première rédaction
       // qui affirmait à tort son absence. `autodiscoverFilter` peut exclure un dépôt
