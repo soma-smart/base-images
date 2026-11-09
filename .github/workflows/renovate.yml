@@ -1,8 +1,9 @@
 name: renovate
 # Boucle de remediation CVE — outil UNIQUE et homogene sur tous les repos d'apps.
 # Renovate self-hosted sur le runner interne (atteint le Harbor prive via hostRules).
-# Config globale unique = renovate-config.js (requireConfig: ignored). autodiscover =>
-# l'installation de l'App soma-base-bumper definit les repos consommateurs.
+# Config globale unique = renovate-config.js (requireConfig: ignored). autodiscover + autodiscoverTopics =>
+# les repos consommateurs sont ceux de l'installation de l'App soma-base-bumper qui portent le topic
+# `soma-base-bumper`.
 # Cf. spec 2026-07-06.
 on:
   schedule:
@@ -26,7 +27,8 @@ jobs:
           app-id: ${{ secrets.BASE_BUMPER_APP_ID }}
           private-key: ${{ secrets.BASE_BUMPER_PRIVATE_KEY }}
           owner: soma-smart
-          # pas de 'repositories' => token sur TOUTES les installations de l'App = les consommateurs
+          # pas de 'repositories' => token sur TOUTES les installations de l'App (« All repositories ») ;
+          # le perimetre traite est borne par le topic `soma-base-bumper` (autodiscoverTopics), pas par le token
       - name: Checkout (config global renovate-config.js)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       # ⚠️ RÉPERTOIRE PARTAGÉ, ET C'EST TOUT LE SUJET. Le runner est en mode dind : le

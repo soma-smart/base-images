@@ -3,8 +3,8 @@
 
 Appelé par `.github/workflows/bump-trivy.yml` (cron quotidien). Tests : `scripts/test_bump_trivy.py`.
 
-⚠️ POURQUOI CE SCRIPT ET PAS RENOVATE : `base-images` n'est pas autodécouvert par Renovate (README : l'installation de
-l'app `soma-base-bumper` = les dépôts consommateurs, et l'y ajouter applique toute la politique de `renovate-config.js`,
+⚠️ POURQUOI CE SCRIPT ET PAS RENOVATE : `base-images` n'est pas autodécouvert par Renovate (README : le périmètre de la
+boucle = les dépôts qui portent le topic `soma-base-bumper`, et le poser applique toute la politique de `renovate-config.js`,
 dont l'automerge `github-actions`, à un dépôt qui porte cette config). Sans suivi, la version de Trivy gèle en silence.
 
 ⚠️ CHAQUE GARDE ÉVITE UN FAUX « À JOUR », la panne silencieuse de cette classe de script :

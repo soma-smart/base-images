@@ -114,7 +114,7 @@ Le mirror publie une base **redigestée**, mais ça ne remédie rien tant que le
 |---|---|
 | `.github/workflows/renovate.yml` | Lance Renovate self-hosted (cron 3×/jour + `workflow_dispatch`) sur le runner `onprem-dev-base-images`. Génère un token d'installation de la GitHub App puis exécute `renovatebot/github-action`. |
 | `renovate-config.js` | **Config globale unique** (`requireConfig: "ignored"` → les `renovate.json` de repo sont ignorés). `autodiscover` + `hostRules` Harbor + `packageRules` (voir plus bas). |
-| GitHub App **`soma-base-bumper`** | Auth de Renovate. `autodiscover` ⇒ **son installation = la liste des repos consommateurs**. Perms : `contents:write` + `pull-requests:write` + `checks:read` + `statuses:read`. Secrets repo : `BASE_BUMPER_APP_ID`, `BASE_BUMPER_PRIVATE_KEY`. |
+| GitHub App **`soma-base-bumper`** | Auth de Renovate. `autodiscover` + `autodiscoverTopics` ⇒ **les consommateurs = les dépôts de son installation (« All repositories ») qui portent le topic `soma-base-bumper`**. Perms : `contents:write` + `pull-requests:write` + `checks:read` + `statuses:read`. Secrets repo : `BASE_BUMPER_APP_ID`, `BASE_BUMPER_PRIVATE_KEY`. |
 | `ci-docker-build.yml` (dans **chaque app**) | Gate : `docker build` sur PR. C'est le check qui doit passer au vert avant que Renovate automerge un bump de digest. |
 
 ### Le flux

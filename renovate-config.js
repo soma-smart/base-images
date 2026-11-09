@@ -525,9 +525,9 @@ module.exports = {
     // l'a vu : le dépôt est resté hors de tout périmètre Renovate — ni ici, ni côté
     // App Mend — et Outline a filé de 1.8.1 à 1.9.2 (trois versions, cinq semaines)
     // sans une seule PR. Même panne que multica-runtime, même cause.
-    // ⚠️ Cette config ne fait RIEN tant que l'App `soma-base-bumper` n'est pas
-    // installée sur `soma-smart/outline` : `autodiscover` ne voit que ses
-    // installations. Détection du cas général : #3913.
+    // ⚠️ Cette config ne fait RIEN tant que `soma-smart/outline` ne porte pas le topic
+    // `soma-base-bumper` (`autodiscoverTopics`) : la boucle ne traite que les dépôts
+    // taggués. Détection du cas général : #3913.
     //
     // ⚠️ L'automerge est ADOSSÉ À UN VRAI GATE, et il a fallu le créer : le workflow
     // ne se déclenchait que sur `push`, donc une PR de bump n'avait AUCUN check et
