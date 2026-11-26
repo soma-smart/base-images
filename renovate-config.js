@@ -77,8 +77,11 @@ module.exports = {
   // #12/#13 existent pour garantir.
   //
   // ⚠️ Ça n'affaiblit AUCUNE protection réelle : là où le timestamp existe
-  // (`github-releases`, `deb`), le seuil de 3 jours continue de s'appliquer. Là où
-  // il n'existe pas, il ne protégeait rien — il bloquait.
+  // (`github-releases`), le seuil de 3 jours continue de s'appliquer. Là où il n'existe
+  // pas, il ne protégeait rien — il bloquait. ⚠️ `deb` et `github-release-attachments`
+  // n'en fournissent PAS (vérifié le 2026-11-26 dans le code de Renovate : aucun
+  // `releaseTimestamp` dans ces deux datasources) : claude-code et le daemon multica n'ont
+  // aucune maturation côté Renovate (cf. la dernière packageRule).
   // ⚠️ L'observable existe et il est nouveau : sous `timestamp-optional`, Renovate
   // émet un `logger.once.warn` « Some release(s) did not have a releaseTimestamp …
   // proceeding », qui remonte dans « Repository Problems » du Dashboard. Il dit
@@ -200,8 +203,9 @@ module.exports = {
       // ⚠️ Même racine de confiance que `checksums.txt` : ce hash ne protège pas d'une
       // release recoupée AVANT la PR. Depuis le 2026-11-26 (décision de Gautier) la PR est
       // AUTO-MERGÉE (cf. dernière packageRule) : plus de relecture humaine du hash, seule la
-      // maturité de 3 jours (revérifiée en aval par auto-merge-infra de multica-runtime) protège
-      // d'une release compromise. Le gate `sha256sum -c` du build attrape, lui, une release
+      // maturité de 3 jours, revérifiée en aval par auto-merge-infra de multica-runtime (Renovate
+      // n'en applique aucune ici : `github-release-attachments` n'a pas d'horodatage), protège
+      // d'une release compromise (minor/patch, multica-runtime seulement). Le gate `sha256sum -c` du build attrape, lui, une release
       // recoupée APRÈS le merge ; un `MULTICA_SHA256` changé seul (même version) est un update
       // `digest`, hors minor/patch : il reste humain. Ne pas retirer l'épingle du hash.
       description: "ARG MULTICA_VERSION + MULTICA_SHA256 (Dockerfile) — daemon multica, forme `vX.Y.Z`",
@@ -604,9 +608,10 @@ module.exports = {
       // Ce que ces épingles gouvernent n'est pas une dépendance applicative
       // ordinaire : le daemon qui EXÉCUTE les tâches de l'agent, la CLI qu'il
       // fait tourner, et le scanner censé prouver que l'image est saine.
-      // ⚠️ `false` est ce qui force la relecture humaine de la paire version/hash de
-      // multica : version et hash viennent de la même source, donc la PR sort verte, et
-      // sans lui elle serait mergée sans relecture, alors qu'elle monte un daemon qui porte un jeton d'écriture.
+      // ⚠️ `false` force la relecture humaine des épingles regex — HORS l'exception ci-dessous
+      // (multica-runtime : daemon, gh, claude-code en minor/patch). Pour le daemon, version et
+      // hash viennent de la même source, donc la PR sort verte : sans relecture, seule la
+      // maturité protège d'une release compromise, alors que le daemon porte un jeton d'écriture.
       // ⚠️ UNE exception, explicite et nommée, en fin de liste : daemon multica, gh et claude-code de
       // multica-runtime (décision de Gautier du 2026-11-26 ; la relecture humaine du hash du daemon
       // disparaît, seule la maturation de 3 jours protège d'une release compromise).
@@ -648,9 +653,11 @@ module.exports = {
       // Gate de cet automerge-ci : le build de la PR (`sha256sum -c` du daemon, compilation de gh,
       // apt de la version EXACTE de claude-code, Trivy bloquant). La maturation de 3 jours (règle
       // « Épingles regex ») ne s'applique ici que si la datasource fournit un horodatage
-      // (`timestamp-optional` : sinon, aucun délai) — non vérifié pour `github-release-attachments`
-      // (daemon) et `deb` (claude-code). Les 3 jours sont de toute façon REVÉRIFIÉS à la source
-      // (release GitHub, npm) par auto-merge-infra avant tout déploiement.
+      // (`timestamp-optional` : sinon, aucun délai). Vérifié le 2026-11-26 dans le code de Renovate :
+      // `github-releases` (gh) en fournit un, `github-release-attachments` (daemon) et `deb`
+      // (claude-code) NON — ces deux PR sont donc auto-mergées sans délai. Les 3 jours sont
+      // REVÉRIFIÉS à la source (release GitHub, npm) par auto-merge-infra de multica-runtime avant
+      // tout DÉPLOIEMENT : c'est là, et seulement là, qu'ils tiennent pour ces deux paquets.
       // ⚠️ Daemon en 0.x : Renovate classe 0.x → 0.y en `minor`, donc ces montées (potentiellement
       // cassantes) sont auto-mergées ; « majeur au Dashboard » ne jouera qu'au passage en 1.0.
       // Risque accepté : gate de couplage de version côté infra + sauvegarde PreSync de multica-pg.
