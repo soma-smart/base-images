@@ -636,11 +636,14 @@ module.exports = {
       // puis `pr-couplee` (repointage dans infra-datacenter-docs, merge sans humain sous conditions).
       // Gate de l'automerge : le build de la PR (apt installe la version EXACTE, Trivy bloquant).
       // La maturation de 3 jours (règle « Épingles regex ») reste, quand Renovate lit un horodatage ;
-      // le canal apt `stable` retarde déjà d'environ 10 jours sur npm.
+      // le canal apt `stable` est en retard sur npm (le 2026-11-26 : `stable` = 2.1.326, publiée le
+      // 2026-11-16, quand `latest` = 2.1.332).
       // ⚠️ Majeur exclu : il reste en Dependency Dashboard (règle « majeur » ci-dessus).
       // ⚠️ Le daemon `multica-ai/multica` n'est PAS concerné : il reste humain.
       description: "Claude Code (multica-runtime) : automerge mineur/patch, chaîne de déploiement automatique",
       matchManagers: ["custom.regex"],
+      // Bornée au seul dépôt dont la chaîne de déploiement automatique existe.
+      matchRepositories: ["soma-smart/multica-runtime"],
       matchPackageNames: ["claude-code"],
       matchUpdateTypes: ["minor", "patch"],
       automerge: true,
