@@ -15,6 +15,7 @@
 //   2. github-actions (SHA-pinnées)   -> automerge minor/patch/digest, majors en dashboard
 //   3. deps applicatives (pip/pep621) -> mineur/patch automerge (matures 3j), majeur en PR
 //   4. épingles regex (custom.regex)  -> JAMAIS d'automerge, majeurs en dashboard
+//      (seule exception : claude-code de multica-runtime, automerge mineur/patch, cf. sa règle)
 //
 // ⚠️ La famille 4 ne partage AUCUNE `packageRule` avec les trois autres : elles
 // gatent toutes sur `matchManagers`, et un dep extrait par un manager regex se
@@ -603,6 +604,7 @@ module.exports = {
       // multica : version et hash viennent de la même source, donc la PR sort verte, et
       // sans lui elle serait mergée sans relecture, alors qu'elle monte un daemon qui porte un jeton d'écriture.
       // Ne pas le surcharger par une règle plus bas, pour multica en particulier.
+      // ⚠️ UNE exception, explicite et nommée : `claude-code` (règle en fin de liste).
       automerge: false,
     },
     {
@@ -626,6 +628,27 @@ module.exports = {
       matchManagers: ["custom.regex"],
       matchPackageNames: ["multica-ai/multica"],
       schedule: ["* * * * 1"],
+    },
+    {
+      // Seule exception à « JAMAIS d'automerge » des épingles regex. Décision de Gautier du
+      // 2026-11-26 : la mise à jour de Claude Code du runtime d'agents Multica est entièrement
+      // automatique. Cette PR auto-mergée déclenche, dans multica-runtime, `tag-auto.yml` (tag)
+      // puis `pr-couplee` (repointage dans infra-datacenter-docs, merge sans humain sous conditions).
+      // Gate de l'automerge : le build de la PR (apt installe la version EXACTE, Trivy bloquant).
+      // La maturation de 3 jours (règle « Épingles regex ») reste, quand Renovate lit un horodatage ;
+      // le canal apt `stable` est en retard sur npm (le 2026-11-26 : `stable` = 2.1.326, publiée le
+      // 2026-11-16, quand `latest` = 2.1.332).
+      // ⚠️ Majeur exclu : il reste en Dependency Dashboard (règle « majeur » ci-dessus).
+      // ⚠️ Le daemon `multica-ai/multica` n'est PAS concerné : il reste humain.
+      description: "Claude Code (multica-runtime) : automerge mineur/patch, chaîne de déploiement automatique",
+      matchManagers: ["custom.regex"],
+      // Bornée au seul dépôt dont la chaîne de déploiement automatique existe.
+      matchRepositories: ["soma-smart/multica-runtime"],
+      matchPackageNames: ["claude-code"],
+      matchUpdateTypes: ["minor", "patch"],
+      automerge: true,
+      automergeType: "pr",
+      platformAutomerge: false,
     },
   ],
 };
