@@ -611,5 +611,21 @@ module.exports = {
       matchUpdateTypes: ["major"],
       dependencyDashboardApproval: true,
     },
+    {
+      // Le daemon `multica` (MULTICA_VERSION de multica-runtime) doit monter AVEC le serveur
+      // Multica, suivi côté infra par la règle `multica-ai/multica` de
+      // soma-smart/infra-datacenter-docs/renovate.json, planifiée le lundi (`* * * * 1`, UTC).
+      // Même créneau ici, pour que les deux propositions arrivent ensemble au lieu de dériver :
+      // le 2026-11-25, la PR du daemon visait 0.11.1 pendant que le serveur passait en 0.13.0.
+      // Côté infra, un gate refuse tout écart de version entre les deux (volet V de
+      // validate-manifests.py). Plan :
+      // soma-smart/infra-datacenter-docs, docs/superpowers/plans/2026-11-26-multica-mise-a-jour-couplee.md.
+      // ⚠️ Ne touche ni à la maturation ni à l'automerge : la règle « Épingles regex » ci-dessus
+      // (3 jours, JAMAIS d'automerge) continue de s'appliquer à multica.
+      description: "Daemon multica : même créneau hebdomadaire que le serveur côté infra",
+      matchManagers: ["custom.regex"],
+      matchPackageNames: ["multica-ai/multica"],
+      schedule: ["* * * * 1"],
+    },
   ],
 };
