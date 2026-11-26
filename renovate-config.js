@@ -198,9 +198,12 @@ module.exports = {
       // interroge `0.6.3` et le lookup échoue en 404. Revérifier d'un lookup local :
       // `renovate --platform=local` sur un Dockerfile type, sans PR.
       // ⚠️ Même racine de confiance que `checksums.txt` : ce hash ne protège pas d'une
-      // release recoupée AVANT la PR. Le contrôle est la relecture de la PR (jamais
-      // d'automerge, cf. packageRules) ; le gate `sha256sum -c` du build attrape, lui,
-      // une release recoupée APRÈS le merge de la PR. Ne pas retirer l'épingle du hash.
+      // release recoupée AVANT la PR. Depuis le 2026-11-26 (décision de Gautier) la PR est
+      // AUTO-MERGÉE (cf. dernière packageRule) : plus de relecture humaine du hash, seule la
+      // maturité de 3 jours (revérifiée en aval par auto-merge-infra de multica-runtime) protège
+      // d'une release compromise. Le gate `sha256sum -c` du build attrape, lui, une release
+      // recoupée APRÈS le merge ; un `MULTICA_SHA256` changé seul (même version) est un update
+      // `digest`, hors minor/patch : il reste humain. Ne pas retirer l'épingle du hash.
       description: "ARG MULTICA_VERSION + MULTICA_SHA256 (Dockerfile) — daemon multica, forme `vX.Y.Z`",
       customType: "regex",
       managerFilePatterns: ["/(^|/)Dockerfile$/"],
@@ -593,7 +596,7 @@ module.exports = {
       // compromis ou retiré juste après publication). ⚠️ Utile ici en
       // particulier : `claude-code` publie très fréquemment, et sans ce délai la
       // PR serait rebasée en permanence pour du bruit.
-      description: "Épingles regex — maturation 3j, JAMAIS d'automerge",
+      description: "Épingles regex — maturation 3j, pas d'automerge (sauf runtime Multica, dernière règle)",
       matchManagers: ["custom.regex"],
       minimumReleaseAge: "3 days",
       internalChecksFilter: "strict",
@@ -624,8 +627,11 @@ module.exports = {
       // Côté infra, un gate refuse tout écart de version entre les deux (volet V de
       // validate-manifests.py). Plan :
       // soma-smart/infra-datacenter-docs, docs/superpowers/plans/2026-11-26-multica-mise-a-jour-couplee.md.
-      // ⚠️ Ne touche ni à la maturation ni à l'automerge : la règle « Épingles regex » ci-dessus
-      // (3 jours, JAMAIS d'automerge) continue de s'appliquer à multica.
+      // ⚠️ Ne touche ni à la maturation ni à l'automerge. La maturation de 3 jours de la règle
+      // « Épingles regex » s'applique ; l'automerge vient de la DERNIÈRE règle (daemon, gh,
+      // claude-code de multica-runtime, décision du 2026-11-26). Ce `schedule` ne régit que la
+      // création des branches : l'automerge peut survenir un autre jour, les fenêtres de
+      // déploiement sont gardées en aval par auto-merge-infra (multica-runtime).
       description: "Daemon multica : même créneau hebdomadaire que le serveur côté infra",
       matchManagers: ["custom.regex"],
       matchPackageNames: ["multica-ai/multica"],
@@ -641,8 +647,13 @@ module.exports = {
       // provenance du tag, liste blanche du diff, Gates.
       // Gate de cet automerge-ci : le build de la PR (`sha256sum -c` du daemon, compilation de gh,
       // apt de la version EXACTE de claude-code, Trivy bloquant). La maturation de 3 jours (règle
-      // « Épingles regex ») s'applique là où Renovate lit un horodatage (releases GitHub du daemon
-      // et de gh) ; claude-code suit le canal apt `stable`, en retard sur npm.
+      // « Épingles regex ») ne s'applique ici que si la datasource fournit un horodatage
+      // (`timestamp-optional` : sinon, aucun délai) — non vérifié pour `github-release-attachments`
+      // (daemon) et `deb` (claude-code). Les 3 jours sont de toute façon REVÉRIFIÉS à la source
+      // (release GitHub, npm) par auto-merge-infra avant tout déploiement.
+      // ⚠️ Daemon en 0.x : Renovate classe 0.x → 0.y en `minor`, donc ces montées (potentiellement
+      // cassantes) sont auto-mergées ; « majeur au Dashboard » ne jouera qu'au passage en 1.0.
+      // Risque accepté : gate de couplage de version côté infra + sauvegarde PreSync de multica-pg.
       // ⚠️ Plus de relecture humaine du hash du daemon : version et hash viennent de la même
       // release, seule la maturité protège d'une release compromise (accepté par la décision).
       // ⚠️ Majeur exclu : il reste en Dependency Dashboard (règle « majeur » ci-dessus).
