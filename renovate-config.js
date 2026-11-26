@@ -76,7 +76,7 @@ module.exports = {
   // filtrée en aval, gate vert, dep figé pour toujours) — l'inverse exact de ce que
   // #12/#13 existent pour garantir.
   //
-  // ⚠️ Ça n'affaiblit AUCUNE protection réelle : là où le timestamp existe
+  // ⚠️ Ça n'affaiblit aucune protection sur les PR relues par un humain : là où le timestamp existe
   // (`github-releases`), le seuil de 3 jours continue de s'appliquer. Là où il n'existe
   // pas, il ne protégeait rien — il bloquait. ⚠️ `deb` et `github-release-attachments`
   // n'en fournissent PAS (vérifié le 2026-11-26 dans le code de Renovate : aucun
@@ -597,9 +597,10 @@ module.exports = {
     {
       // Maturation supply-chain, comme pip/pep621 : on n'ouvre pas de PR sur une
       // version publiée il y a moins de 3 jours (protection contre un paquet
-      // compromis ou retiré juste après publication). ⚠️ Utile ici en
-      // particulier : `claude-code` publie très fréquemment, et sans ce délai la
-      // PR serait rebasée en permanence pour du bruit.
+      // compromis ou retiré juste après publication). ⚠️ Ne s'applique qu'aux
+      // datasources qui fournissent un horodatage (`github-releases` : gh, Trivy non) ;
+      // `deb` (claude-code) et `github-release-attachments` (daemon) n'en ont pas, donc
+      // aucun délai pour eux ici (cf. `minimumReleaseAgeBehaviour` plus haut).
       description: "Épingles regex — maturation 3j, pas d'automerge (sauf runtime Multica, dernière règle)",
       matchManagers: ["custom.regex"],
       minimumReleaseAge: "3 days",
@@ -611,10 +612,11 @@ module.exports = {
       // ⚠️ `false` force la relecture humaine des épingles regex — HORS l'exception ci-dessous
       // (multica-runtime : daemon, gh, claude-code en minor/patch). Pour le daemon, version et
       // hash viennent de la même source, donc la PR sort verte : sans relecture, seule la
-      // maturité protège d'une release compromise, alors que le daemon porte un jeton d'écriture.
+      // maturité de 3 jours, REVÉRIFIÉE AU DÉPLOIEMENT par auto-merge-infra (aucune ici), protège
+      // d'une release compromise, alors que le daemon porte un jeton d'écriture.
       // ⚠️ UNE exception, explicite et nommée, en fin de liste : daemon multica, gh et claude-code de
       // multica-runtime (décision de Gautier du 2026-11-26 ; la relecture humaine du hash du daemon
-      // disparaît, seule la maturation de 3 jours protège d'une release compromise).
+      // disparaît ; seule la maturité de 3 jours, vérifiée au déploiement, protège d'une release compromise).
       automerge: false,
     },
     {
@@ -632,8 +634,9 @@ module.exports = {
       // Côté infra, un gate refuse tout écart de version entre les deux (volet V de
       // validate-manifests.py). Plan :
       // soma-smart/infra-datacenter-docs, docs/superpowers/plans/2026-11-26-multica-mise-a-jour-couplee.md.
-      // ⚠️ Ne touche ni à la maturation ni à l'automerge. La maturation de 3 jours de la règle
-      // « Épingles regex » s'applique ; l'automerge vient de la DERNIÈRE règle (daemon, gh,
+      // ⚠️ Ne touche ni à la maturation ni à l'automerge. Aucune maturation côté Renovate pour le
+      // daemon (`github-release-attachments` sans horodatage) ; l'automerge vient de la DERNIÈRE
+      // règle (daemon, gh,
       // claude-code de multica-runtime, décision du 2026-11-26). Ce `schedule` ne régit que la
       // création des branches : l'automerge peut survenir un autre jour, les fenêtres de
       // déploiement sont gardées en aval par auto-merge-infra (multica-runtime).
@@ -662,10 +665,10 @@ module.exports = {
       // cassantes) sont auto-mergées ; « majeur au Dashboard » ne jouera qu'au passage en 1.0.
       // Risque accepté : gate de couplage de version côté infra + sauvegarde PreSync de multica-pg.
       // ⚠️ Plus de relecture humaine du hash du daemon : version et hash viennent de la même
-      // release, seule la maturité protège d'une release compromise (accepté par la décision).
+      // release, seule la maturité vérifiée au déploiement protège d'une release compromise (accepté).
       // ⚠️ Majeur exclu : il reste en Dependency Dashboard (règle « majeur » ci-dessus).
       // ⚠️ Trivy (`TRIVY_VERSION`, CI seulement) reste humain : sa datasource docker n'a pas
-      // d'horodatage, les 3 jours n'y seraient pas garantis.
+      // d'horodatage, et rien en aval ne revérifierait les 3 jours (il n'est pas déployé).
       description: "Runtime Multica (daemon, gh, claude-code) : automerge mineur/patch, chaîne de déploiement automatique",
       matchManagers: ["custom.regex"],
       // Bornée au seul dépôt dont la chaîne de déploiement automatique existe.
