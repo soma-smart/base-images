@@ -15,7 +15,8 @@
 //   2. github-actions (SHA-pinnées)   -> automerge minor/patch/digest, majors en dashboard
 //   3. deps applicatives (pip/pep621) -> mineur/patch automerge (matures 3j), majeur en PR
 //   4. épingles regex (custom.regex)  -> JAMAIS d'automerge, majeurs en dashboard
-//      (seule exception : claude-code de multica-runtime, automerge mineur/patch, cf. sa règle)
+//      (exception : daemon multica, gh et claude-code de multica-runtime, automerge mineur/patch,
+//       cf. la dernière règle — décision de Gautier du 2026-11-26)
 //
 // ⚠️ La famille 4 ne partage AUCUNE `packageRule` avec les trois autres : elles
 // gatent toutes sur `matchManagers`, et un dep extrait par un manager regex se
@@ -75,9 +76,12 @@ module.exports = {
   // filtrée en aval, gate vert, dep figé pour toujours) — l'inverse exact de ce que
   // #12/#13 existent pour garantir.
   //
-  // ⚠️ Ça n'affaiblit AUCUNE protection réelle : là où le timestamp existe
-  // (`github-releases`, `deb`), le seuil de 3 jours continue de s'appliquer. Là où
-  // il n'existe pas, il ne protégeait rien — il bloquait.
+  // ⚠️ Ça n'affaiblit aucune protection sur les PR relues par un humain : là où le timestamp existe
+  // (`github-releases`), le seuil de 3 jours continue de s'appliquer. Là où il n'existe
+  // pas, il ne protégeait rien — il bloquait. ⚠️ `deb` et `github-release-attachments`
+  // n'en fournissent PAS (vérifié le 2026-11-26 dans le code de Renovate : aucun
+  // `releaseTimestamp` dans ces deux datasources) : claude-code et le daemon multica n'ont
+  // aucune maturation côté Renovate (cf. la dernière packageRule).
   // ⚠️ L'observable existe et il est nouveau : sous `timestamp-optional`, Renovate
   // émet un `logger.once.warn` « Some release(s) did not have a releaseTimestamp …
   // proceeding », qui remonte dans « Repository Problems » du Dashboard. Il dit
@@ -197,9 +201,13 @@ module.exports = {
       // interroge `0.6.3` et le lookup échoue en 404. Revérifier d'un lookup local :
       // `renovate --platform=local` sur un Dockerfile type, sans PR.
       // ⚠️ Même racine de confiance que `checksums.txt` : ce hash ne protège pas d'une
-      // release recoupée AVANT la PR. Le contrôle est la relecture de la PR (jamais
-      // d'automerge, cf. packageRules) ; le gate `sha256sum -c` du build attrape, lui,
-      // une release recoupée APRÈS le merge de la PR. Ne pas retirer l'épingle du hash.
+      // release recoupée AVANT la PR. Depuis le 2026-11-26 (décision de Gautier) la PR est
+      // AUTO-MERGÉE (cf. dernière packageRule) : plus de relecture humaine du hash, seule la
+      // maturité de 3 jours, revérifiée en aval par auto-merge-infra de multica-runtime (Renovate
+      // n'en applique aucune ici : `github-release-attachments` n'a pas d'horodatage), protège
+      // d'une release compromise (minor/patch, multica-runtime seulement). Le gate `sha256sum -c` du build attrape, lui, une release
+      // recoupée APRÈS le merge ; un `MULTICA_SHA256` changé seul (même version) est un update
+      // `digest`, hors minor/patch : il reste humain. Ne pas retirer l'épingle du hash.
       description: "ARG MULTICA_VERSION + MULTICA_SHA256 (Dockerfile) — daemon multica, forme `vX.Y.Z`",
       customType: "regex",
       managerFilePatterns: ["/(^|/)Dockerfile$/"],
@@ -589,10 +597,11 @@ module.exports = {
     {
       // Maturation supply-chain, comme pip/pep621 : on n'ouvre pas de PR sur une
       // version publiée il y a moins de 3 jours (protection contre un paquet
-      // compromis ou retiré juste après publication). ⚠️ Utile ici en
-      // particulier : `claude-code` publie très fréquemment, et sans ce délai la
-      // PR serait rebasée en permanence pour du bruit.
-      description: "Épingles regex — maturation 3j, JAMAIS d'automerge",
+      // compromis ou retiré juste après publication). ⚠️ Ne s'applique qu'aux
+      // datasources qui fournissent un horodatage (`github-releases` : gh, Trivy non) ;
+      // `deb` (claude-code) et `github-release-attachments` (daemon) n'en ont pas, donc
+      // aucun délai pour eux ici (cf. `minimumReleaseAgeBehaviour` plus haut).
+      description: "Épingles regex — maturation 3j, pas d'automerge (sauf runtime Multica, dernière règle)",
       matchManagers: ["custom.regex"],
       minimumReleaseAge: "3 days",
       internalChecksFilter: "strict",
@@ -600,11 +609,14 @@ module.exports = {
       // Ce que ces épingles gouvernent n'est pas une dépendance applicative
       // ordinaire : le daemon qui EXÉCUTE les tâches de l'agent, la CLI qu'il
       // fait tourner, et le scanner censé prouver que l'image est saine.
-      // ⚠️ `false` est ce qui force la relecture humaine de la paire version/hash de
-      // multica : version et hash viennent de la même source, donc la PR sort verte, et
-      // sans lui elle serait mergée sans relecture, alors qu'elle monte un daemon qui porte un jeton d'écriture.
-      // Ne pas le surcharger par une règle plus bas, pour multica en particulier.
-      // ⚠️ UNE exception, explicite et nommée : `claude-code` (règle en fin de liste).
+      // ⚠️ `false` force la relecture humaine des épingles regex — HORS l'exception ci-dessous
+      // (multica-runtime : daemon, gh, claude-code en minor/patch). Pour le daemon, version et
+      // hash viennent de la même source, donc la PR sort verte : sans relecture, seule la
+      // maturité de 3 jours, REVÉRIFIÉE AU DÉPLOIEMENT par auto-merge-infra (aucune ici), protège
+      // d'une release compromise, alors que le daemon porte un jeton d'écriture.
+      // ⚠️ UNE exception, explicite et nommée, en fin de liste : daemon multica, gh et claude-code de
+      // multica-runtime (décision de Gautier du 2026-11-26 ; la relecture humaine du hash du daemon
+      // disparaît ; seule la maturité de 3 jours, vérifiée au déploiement, protège d'une release compromise).
       automerge: false,
     },
     {
@@ -622,8 +634,12 @@ module.exports = {
       // Côté infra, un gate refuse tout écart de version entre les deux (volet V de
       // validate-manifests.py). Plan :
       // soma-smart/infra-datacenter-docs, docs/superpowers/plans/2026-11-26-multica-mise-a-jour-couplee.md.
-      // ⚠️ Ne touche ni à la maturation ni à l'automerge : la règle « Épingles regex » ci-dessus
-      // (3 jours, JAMAIS d'automerge) continue de s'appliquer à multica.
+      // ⚠️ Ne touche ni à la maturation ni à l'automerge. Aucune maturation côté Renovate pour le
+      // daemon (`github-release-attachments` sans horodatage) ; l'automerge vient de la DERNIÈRE
+      // règle (daemon, gh,
+      // claude-code de multica-runtime, décision du 2026-11-26). Ce `schedule` ne régit que la
+      // création des branches : l'automerge peut survenir un autre jour, les fenêtres de
+      // déploiement sont gardées en aval par auto-merge-infra (multica-runtime).
       description: "Daemon multica : même créneau hebdomadaire que le serveur côté infra",
       matchManagers: ["custom.regex"],
       matchPackageNames: ["multica-ai/multica"],
@@ -631,20 +647,33 @@ module.exports = {
     },
     {
       // Seule exception à « JAMAIS d'automerge » des épingles regex. Décision de Gautier du
-      // 2026-11-26 : la mise à jour de Claude Code du runtime d'agents Multica est entièrement
-      // automatique. Cette PR auto-mergée déclenche, dans multica-runtime, `tag-auto.yml` (tag)
-      // puis `pr-couplee` (repointage dans infra-datacenter-docs, merge sans humain sous conditions).
-      // Gate de l'automerge : le build de la PR (apt installe la version EXACTE, Trivy bloquant).
-      // La maturation de 3 jours (règle « Épingles regex ») reste, quand Renovate lit un horodatage ;
-      // le canal apt `stable` est en retard sur npm (le 2026-11-26 : `stable` = 2.1.326, publiée le
-      // 2026-11-16, quand `latest` = 2.1.332).
+      // 2026-11-26 : toute montée du runtime d'agents Multica est entièrement automatique, daemon
+      // compris (sauvegarde PreSync de multica-pg côté infra avant les migrations du serveur).
+      // Cette PR auto-mergée déclenche, dans multica-runtime, `tag-auto.yml` (tag) puis `pr-couplee`
+      // (PR de repointage dans infra-datacenter-docs), que `auto-merge-infra.yml` merge seul : 3 jours
+      // de maturité de chaque version (revérifiés à la source), fenêtres hors heures de travail,
+      // provenance du tag, liste blanche du diff, Gates.
+      // Gate de cet automerge-ci : le build de la PR (`sha256sum -c` du daemon, compilation de gh,
+      // apt de la version EXACTE de claude-code, Trivy bloquant). La maturation de 3 jours (règle
+      // « Épingles regex ») ne s'applique ici que si la datasource fournit un horodatage
+      // (`timestamp-optional` : sinon, aucun délai). Vérifié le 2026-11-26 dans le code de Renovate :
+      // `github-releases` (gh) en fournit un, `github-release-attachments` (daemon) et `deb`
+      // (claude-code) NON — ces deux PR sont donc auto-mergées sans délai. Les 3 jours sont
+      // REVÉRIFIÉS à la source (release GitHub, npm) par auto-merge-infra de multica-runtime avant
+      // tout DÉPLOIEMENT : c'est là, et seulement là, qu'ils tiennent pour ces deux paquets.
+      // ⚠️ Daemon en 0.x : Renovate classe 0.x → 0.y en `minor`, donc ces montées (potentiellement
+      // cassantes) sont auto-mergées ; « majeur au Dashboard » ne jouera qu'au passage en 1.0.
+      // Risque accepté : gate de couplage de version côté infra + sauvegarde PreSync de multica-pg.
+      // ⚠️ Plus de relecture humaine du hash du daemon : version et hash viennent de la même
+      // release, seule la maturité vérifiée au déploiement protège d'une release compromise (accepté).
       // ⚠️ Majeur exclu : il reste en Dependency Dashboard (règle « majeur » ci-dessus).
-      // ⚠️ Le daemon `multica-ai/multica` n'est PAS concerné : il reste humain.
-      description: "Claude Code (multica-runtime) : automerge mineur/patch, chaîne de déploiement automatique",
+      // ⚠️ Trivy (`TRIVY_VERSION`, CI seulement) reste humain : sa datasource docker n'a pas
+      // d'horodatage, et rien en aval ne revérifierait les 3 jours (il n'est pas déployé).
+      description: "Runtime Multica (daemon, gh, claude-code) : automerge mineur/patch, chaîne de déploiement automatique",
       matchManagers: ["custom.regex"],
       // Bornée au seul dépôt dont la chaîne de déploiement automatique existe.
       matchRepositories: ["soma-smart/multica-runtime"],
-      matchPackageNames: ["claude-code"],
+      matchPackageNames: ["multica-ai/multica", "cli/cli", "claude-code"],
       matchUpdateTypes: ["minor", "patch"],
       automerge: true,
       automergeType: "pr",
